@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#1e40af">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="現場記録">
+<title>出張現場記録 v0.3</title>
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="apple-touch-icon" href="./icon-192.png">
+<script src="https://cdn.jsdelivr.net/npm/exif-js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<style>
+:root{
+  --blue:#1d4ed8; --blue-dark:#1e3a8a; --blue-soft:#eff6ff;
+  --line:#e5e7eb; --muted:#6b7280; --bg:#f3f4f6; --green:#047857;
+}
+*{box-sizing:border-box}
+body{margin:0;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:var(--bg);color:#1f2937}
+button,input,textarea{font:inherit}
+button{touch-action:manipulation}
+header{position:sticky;top:0;z-index:30;background:var(--blue-dark);color:#fff;padding:calc(10px + env(safe-area-inset-top)) 14px 10px;box-shadow:0 2px 8px #0002}
+.header-row{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.title{font-size:18px;font-weight:800}
+.sub{font-size:11px;color:#bfdbfe;margin-top:2px}
+.header-actions{display:flex;gap:7px;align-items:center}
+.chip{border:1px solid #ffffff55;background:#ffffff16;color:#fff;border-radius:999px;padding:7px 10px;font-size:12px}
+main{max-width:680px;margin:auto;padding:10px 10px calc(110px + env(safe-area-inset-bottom))}
+.card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:14px;margin-bottom:10px;box-shadow:0 1px 3px #0000000b}
+.card h2{font-size:15px;margin:0 0 10px}
+.action-grid{display:flex;flex-wrap:wrap;gap:8px}
+.action{border:1px solid #93c5fd;background:#fff;color:#1e40af;border-radius:999px;padding:9px 12px;font-size:14px}
+.action.selected{background:var(--blue);color:#fff;border-color:var(--blue);font-weight:700}
+.small-row{display:flex;gap:8px;margin-top:10px}
+.small-row input{min-width:0;flex:1}
+input,textarea{width:100%;border:1px solid #d1d5db;border-radius:12px;padding:11px;background:#fff;outline:none}
+textarea{min-height:94px;resize:vertical;font-size:16px}
+input:focus,textarea:focus{border-color:#60a5fa;box-shadow:0 0 0 3px #dbeafe}
+.secondary{border:1px solid #bfdbfe;background:#eff6ff;color:#1e40af;border-radius:10px;padding:9px 12px}
+.ghost{border:0;background:transparent;color:var(--muted);padding:6px}
+.photo-button{display:block;border:2px dashed #93c5fd;background:#eff6ff;color:#1d4ed8;border-radius:14px;padding:18px;text-align:center;font-weight:750;cursor:pointer}
+.meta{font-size:12px;color:var(--muted);margin-top:7px;line-height:1.5}
+.gps-good{color:var(--green);font-weight:650}
+.gps-warn{color:#b45309;font-weight:650}
+.record-bar{position:fixed;left:0;right:0;bottom:0;z-index:25;padding:10px 10px calc(10px + env(safe-area-inset-bottom));background:linear-gradient(#f3f4f600,#f3f4f6 22%)}
+.record-button{display:block;width:min(660px,calc(100% - 20px));margin:auto;border:0;border-radius:18px;background:var(--blue);color:#fff;padding:17px;font-size:18px;font-weight:850;box-shadow:0 8px 20px #1d4ed844}
+.record-button:active{transform:translateY(1px);background:#1e40af}
+.record-button[disabled]{opacity:.55}
+.log{border:1px solid var(--line);border-radius:13px;padding:11px;margin-top:8px;background:#fafafa}
+.log-head{display:flex;justify-content:space-between;gap:8px}
+.log-time{font-size:13px;font-weight:800;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.log-place{font-size:12px;color:var(--muted);margin-top:4px}
+.log-task{font-size:14px;margin-top:7px;line-height:1.6}
+.photo-link{margin-top:7px;border:1px solid #bfdbfe;background:#eff6ff;color:#1d4ed8;border-radius:8px;padding:6px 8px;font-size:12px}
+.sheet-bg{position:fixed;inset:0;background:#0008;z-index:50;display:none;align-items:flex-end;justify-content:center}
+.sheet-bg.open{display:flex}
+.sheet{background:#fff;width:100%;max-width:520px;border-radius:20px 20px 0 0;padding:16px 16px calc(16px + env(safe-area-inset-bottom));max-height:90vh;overflow:auto}
+.sheet-title{display:flex;align-items:center;justify-content:space-between;font-weight:800;margin-bottom:12px}
+.sheet-btn{width:100%;border:1px solid var(--line);background:#fff;border-radius:12px;padding:13px;margin-top:8px;text-align:left}
+.sheet-btn.primary{background:var(--blue);color:#fff;border-color:var(--blue);text-align:center;font-weight:800}
+.sheet-btn.danger{color:#b91c1c;border-color:#fecaca;text-align:center}
+.modal{position:fixed;inset:0;background:#000c;z-index:60;display:none;align-items:center;justify-content:center;padding:12px}
+.modal.open{display:flex}
+.modal-card{background:#fff;border-radius:15px;width:min(650px,100%);max-height:90vh;overflow:auto;padding:12px}
+.modal img{width:100%;border-radius:10px;margin-bottom:10px;background:#000;max-height:70vh;object-fit:contain}
+.install-banner{display:none;background:#eff6ff;border:1px solid #bfdbfe;border-radius:12px;padding:10px 12px;margin-bottom:10px;font-size:13px}
+.install-banner.show{display:flex;align-items:center;justify-content:space-between;gap:8px}
+@media(min-width:700px){.sheet{border-radius:20px;margin-bottom:20px}.sheet-bg{align-items:center}}
+</style>
+</head>
+<body>
+<header>
+  <div class="header-row">
+    <div>
+      <div class="title">出張現場記録 <span style="font-size:11px;font-weight:500;color:#bfdbfe">v0.3</span></div>
+      <div id="clock" class="sub"></div>
+    </div>
+    <div class="header-actions">
+      <button id="gps-chip" class="chip" onclick="startGPS(true)">📍 GPS準備中</button>
+      <button class="chip" onclick="openDiagnosis()">診断</button>
+      <button class="chip" onclick="openDataMenu()">データ</button>
+    </div>
+  </div>
+</header>
+
+<main>
+  <div id="install-banner" class="install-banner">
+    <span>ホーム画面に追加するとアプリとして使えます。</span>
+    <button class="secondary" onclick="installApp()">追加</button>
+  </div>
+
+  <section class="card">
+    <div style="display:flex;align-items:center;justify-content:space-between">
+      <h2>作業内容</h2>
+      <button class="ghost" onclick="clearActions()">選択解除</button>
+    </div>
+    <div id="quick-actions" class="action-grid"></div>
+    <details style="margin-top:10px">
+      <summary style="font-size:12px;color:#1d4ed8;cursor:pointer">作業ボタンを追加・編集</summary>
+      <div class="small-row">
+        <input id="new-action" placeholder="例：機器撤収">
+        <button class="secondary" onclick="addAction()">追加</button>
+      </div>
+      <div style="text-align:right;margin-top:5px"><button class="ghost" onclick="resetActions()">標準に戻す</button></div>
+    </details>
+  </section>
+
+  <section class="card">
+    <h2>メモ</h2>
+    <textarea id="note" placeholder="例：UDだけ応答がおかしい。予備機と交換。"></textarea>
+  </section>
+
+  <section class="card">
+    <h2>写真</h2>
+    <label class="photo-button">
+      <input id="photo-input" type="file" accept="image/*" capture="environment" multiple hidden>
+      📷 写真を撮る / 選ぶ
+    </label>
+    <div id="photo-status" class="meta">写真なし</div>
+  </section>
+
+  <section class="card">
+    <div style="display:flex;align-items:center;justify-content:space-between">
+      <h2 style="margin:0">位置</h2>
+      <button class="secondary" onclick="startGPS(true)">GPS更新</button>
+    </div>
+    <div id="gps-detail" class="meta">アプリ起動中に現在地を取得して待機します。</div>
+    <input id="location-label" style="margin-top:8px" placeholder="場所名を任意で入力（例：○○観測点）">
+  </section>
+
+  <section class="card">
+    <div style="display:flex;align-items:center;justify-content:space-between">
+      <h2 style="margin:0">最近の記録</h2>
+      <span id="record-count" class="meta" style="margin:0"></span>
+    </div>
+    <div id="records"></div>
+  </section>
+</main>
+
+<div class="record-bar">
+  <button id="record-button" class="record-button" onclick="createRecord()">＋ 現在の記録を追加</button>
+</div>
+
+
+<div id="diagnosis-menu" class="sheet-bg" onclick="if(event.target===this)closeDiagnosis()">
+  <div class="sheet">
+    <div class="sheet-title">
+      <span>GPS / PWA 診断</span>
+      <button class="ghost" onclick="closeDiagnosis()">✕</button>
+    </div>
+
+    <div id="diag-summary" class="meta" style="font-size:13px;margin-bottom:10px"></div>
+
+    <div id="diag-results" style="display:grid;gap:8px"></div>
+
+    <button class="sheet-btn primary" onclick="runDiagnosis(true)">再診断する</button>
+    <button id="diag-install-button" class="sheet-btn" onclick="installFromDiagnosis()" style="display:none;text-align:center">
+      ホーム画面にインストール
+    </button>
+
+    <div style="margin-top:12px;padding:10px;border-radius:12px;background:#f9fafb;border:1px solid #e5e7eb">
+      <div style="font-weight:750;font-size:13px;margin-bottom:5px">判定の見方</div>
+      <div class="meta" style="margin-top:0">
+        ・「安全な接続」が×なら、GPSとPWAの両方で問題が出やすいです。<br>
+        ・ChromeのPWA判定が「インストール可能」なら、下のインストールボタンを使えます。<br>
+        ・GPSテストのエラーが PERMISSION_DENIED なら権限、TIMEOUT なら位置取得環境、POSITION_UNAVAILABLE なら端末側の位置情報を疑います。
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="data-menu" class="sheet-bg" onclick="if(event.target===this)closeDataMenu()">
+  <div class="sheet">
+    <div class="sheet-title"><span>データ管理</span><button class="ghost" onclick="closeDataMenu()">✕</button></div>
+    <button class="sheet-btn primary" onclick="exportPackage()">📦 PC用パッケージを書き出す</button>
+    <label class="sheet-btn" style="display:block;cursor:pointer;text-align:center">
+      <input id="import-package" type="file" accept=".zip,.json,application/zip,application/json" hidden>
+      既存データを読み込む
+    </label>
+    <button class="sheet-btn" onclick="downloadJson()">JSONだけを書き出す</button>
+    <button class="sheet-btn danger" onclick="clearAllData()">全記録を消去</button>
+    <div class="meta">記録は端末のこのブラウザ内に保存されます。PCへ渡すときはZIPを書き出してください。</div>
+  </div>
+</div>
+
+<div id="photo-modal" class="modal" onclick="if(event.target===this)closePhotoModal()">
+  <div class="modal-card">
+    <div style="display:flex;justify-content:space-between;margin-bottom:8px"><b>記録写真</b><button class="ghost" onclick="closePhotoModal()">✕</button></div>
+    <div id="photo-modal-content"></div>
+  </div>
+</div>
+
+<script>
+const STORAGE_KEY="eri_field_recorder_v02";
+const LEGACY_KEY="eri_field_recorder_v01";
+const DB_NAME="eri_field_photos_v02";
+const STORE="photos";
+const DEFAULT_ACTIONS=["観測点到着","データ回収","地震計確認","SD交換","バッテリー交換","GPS確認","アンテナ交換","電源確認","移動開始","作業終了"];
+
+let actions=[...DEFAULT_ACTIONS], selectedActions=[], records=[], idCounter=0, pendingPhotos=[];
+let latestGPS={lat:null,lng:null,accuracy:null,time:null};
+let gpsWatchId=null, deferredInstall=null;
+
+const $=id=>document.getElementById(id);
+const qa=$("quick-actions"),note=$("note"),photoInput=$("photo-input"),photoStatus=$("photo-status"),
+locationLabel=$("location-label"),gpsChip=$("gps-chip"),gpsDetail=$("gps-detail"),recordsEl=$("records"),
+recordCount=$("record-count"),dataMenu=$("data-menu"),importPackageInput=$("import-package"),
+photoModal=$("photo-modal"),photoModalContent=$("photo-modal-content"),installBanner=$("install-banner"),
+diagnosisMenu=$("diagnosis-menu"),diagResults=$("diag-results"),diagSummary=$("diag-summary"),diagInstallButton=$("diag-install-button");
+
+function esc(v){return String(v??"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;")}
+function nowText(sec=false){const d=new Date();return `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,"0")}/${String(d.getDate()).padStart(2,"0")} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}${sec?":"+String(d.getSeconds()).padStart(2,"0"):""}`}
+function tick(){ $("clock").textContent=nowText(true); renderGPS(); }
+setInterval(tick,1000);tick();
+
+function save(){
+  try{localStorage.setItem(STORAGE_KEY,JSON.stringify({actions,selectedActions,records,idCounter,note:note.value,locationLabel:locationLabel.value}))}catch(e){console.warn(e)}
+}
+function load(){
+  try{
+    const raw=localStorage.getItem(STORAGE_KEY)||localStorage.getItem(LEGACY_KEY);if(!raw)return;
+    const d=JSON.parse(raw);
+    if(Array.isArray(d.actions))actions=d.actions;
+    if(Array.isArray(d.selectedActions))selectedActions=d.selectedActions;
+    if(Array.isArray(d.records))records=d.records;
+    if(Number.isInteger(d.idCounter))idCounter=d.idCounter;
+    if(typeof d.note==="string")note.value=d.note;
+    if(typeof d.locationLabel==="string")locationLabel.value=d.locationLabel;
+  }catch(e){console.warn(e)}
+}
+
+function renderActions(){
+  qa.innerHTML="";
+  actions.forEach(a=>{
+    const b=document.createElement("button"),sel=selectedActions.includes(a);
+    b.className="action"+(sel?" selected":"");b.textContent=a;
+    b.onclick=()=>{selectedActions=sel?selectedActions.filter(x=>x!==a):[...selectedActions,a];renderActions();save()};
+    qa.appendChild(b);
+  });
+}
+function clearActions(){selectedActions=[];renderActions();save()}
+function addAction(){const e=$("new-action"),v=e.value.trim();if(!v)return;if(!actions.includes(v))actions.push(v);selectedActions=[...new Set([...selectedActions,v])];e.value="";renderActions();save()}
+function resetActions(){if(confirm("作業ボタンを標準状態に戻しますか？")){actions=[...DEFAULT_ACTIONS];selectedActions=[];renderActions();save()}}
+
+photoInput.addEventListener("change",e=>{pendingPhotos.push(...[...(e.target.files||[])].filter(f=>f.type.startsWith("image/")));e.target.value="";renderPhotoStatus()});
+function renderPhotoStatus(){photoStatus.textContent=pendingPhotos.length?`${pendingPhotos.length}枚：${pendingPhotos.slice(0,3).map(f=>f.name).join(" / ")}${pendingPhotos.length>3?` ほか${pendingPhotos.length-3}枚`:""}`:"写真なし"}
+
+function gpsAge(){return latestGPS.time?Math.max(0,Date.now()-latestGPS.time):Infinity}
+function renderGPS(){
+  if(latestGPS.lat===null){
+    gpsChip.textContent="📍 GPS未取得";gpsDetail.className="meta gps-warn";gpsDetail.textContent="GPS未取得。位置情報を許可すると、記録時に直近位置を即座に使います。";return;
+  }
+  const age=Math.floor(gpsAge()/1000),fresh=age<120;
+  gpsChip.textContent=fresh?"📍 GPS OK":"📍 GPS古い";
+  gpsDetail.className="meta "+(fresh?"gps-good":"gps-warn");
+  gpsDetail.textContent=`${latestGPS.lat.toFixed(6)}, ${latestGPS.lng.toFixed(6)} / 精度 約${Math.round(latestGPS.accuracy)}m / ${age}秒前`;
+}
+function startGPS(force=false){
+  if(!navigator.geolocation){gpsDetail.textContent="このブラウザは位置情報に対応していません。";return}
+  if(gpsWatchId!==null&&!force)return;
+  if(gpsWatchId!==null){navigator.geolocation.clearWatch(gpsWatchId);gpsWatchId=null}
+  gpsChip.textContent="📍 GPS取得中";
+  gpsWatchId=navigator.geolocation.watchPosition(p=>{
+    latestGPS={lat:p.coords.latitude,lng:p.coords.longitude,accuracy:p.coords.accuracy,time:Date.now()};renderGPS();
+  },e=>{console.warn(e);gpsChip.textContent="📍 GPS未取得";gpsDetail.className="meta gps-warn";gpsDetail.textContent="位置情報を取得できません。権限・HTTPS・端末設定を確認してください。"},
+  {enableHighAccuracy:true,maximumAge:15000,timeout:12000});
+}
+
+function openDB(){return new Promise((res,rej)=>{const r=indexedDB.open(DB_NAME,1);r.onupgradeneeded=()=>{const db=r.result;if(!db.objectStoreNames.contains(STORE)){const s=db.createObjectStore(STORE,{keyPath:"id"});s.createIndex("recordId","recordId",{unique:false})}};r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)})}
+async function storePhotos(recordId,files){if(!files.length)return;const db=await openDB();await new Promise((res,rej)=>{const tx=db.transaction(STORE,"readwrite"),s=tx.objectStore(STORE);files.forEach((f,i)=>s.put({id:`${recordId}_${Date.now()}_${i}`,recordId,name:f.name||`photo_${i+1}.jpg`,type:f.type||"image/jpeg",blob:f}));tx.oncomplete=res;tx.onerror=()=>rej(tx.error)});db.close()}
+async function photosFor(recordId){const db=await openDB();const rows=await new Promise((res,rej)=>{const tx=db.transaction(STORE,"readonly"),r=tx.objectStore(STORE).index("recordId").getAll(recordId);r.onsuccess=()=>res(r.result||[]);r.onerror=()=>rej(r.error)});db.close();return rows}
+async function deletePhotos(recordId){try{const rows=await photosFor(recordId);if(!rows.length)return;const db=await openDB();await new Promise((res,rej)=>{const tx=db.transaction(STORE,"readwrite"),s=tx.objectStore(STORE);rows.forEach(r=>s.delete(r.id));tx.oncomplete=res;tx.onerror=()=>rej(tx.error)});db.close()}catch(e){console.warn(e)}}
+async function clearPhotoDB(){try{const db=await openDB();await new Promise((res,rej)=>{const tx=db.transaction(STORE,"readwrite");tx.objectStore(STORE).clear();tx.oncomplete=res;tx.onerror=()=>rej(tx.error)});db.close()}catch(e){}}
+
+async function createRecord(){
+  const memo=note.value.trim(),photos=[...pendingPhotos];
+  if(!selectedActions.length&&!memo&&!photos.length){alert("作業内容・メモ・写真のいずれかを追加してください。");return}
+  const btn=$("record-button");btn.disabled=true;btn.textContent="記録中…";
+  const id=idCounter++,age=gpsAge(),useGPS=latestGPS.lat!==null&&age<5*60*1000;
+  const rec={id,time:nowText(false),location:locationLabel.value.trim(),lat:useGPS?latestGPS.lat:null,lng:useGPS?latestGPS.lng:null,gpsAccuracy:useGPS?latestGPS.accuracy:null,gpsAgeSec:useGPS?Math.round(age/1000):null,actions:[...selectedActions],note:memo,photoCount:photos.length,photoNames:photos.map(f=>f.name)};
+  records.push(rec);
+  try{await storePhotos(id,photos)}catch(e){console.warn(e);alert("記録は保存しましたが、写真本体の保存に失敗しました。")}
+  selectedActions=[];note.value="";pendingPhotos=[];renderActions();renderPhotoStatus();renderRecords();save();
+  btn.disabled=false;btn.textContent="＋ 現在の記録を追加";
+  if(navigator.vibrate)navigator.vibrate(60);
+}
+function renderRecords(){
+  recordCount.textContent=`${records.length}件`;recordsEl.innerHTML="";
+  if(!records.length){recordsEl.innerHTML='<div class="meta" style="text-align:center;padding:20px">まだ記録がありません。</div>';return}
+  [...records].sort((a,b)=>b.time.localeCompare(a.time)).slice(0,20).forEach(r=>{
+    const items=[...(r.actions||[]),...(r.note?[r.note]:[])],place=r.location||(r.lat!==null&&r.lat!==undefined?`${Number(r.lat).toFixed(6)}, ${Number(r.lng).toFixed(6)}`:"場所未取得");
+    const d=document.createElement("div");d.className="log";d.innerHTML=`
+      <div class="log-head"><div class="log-time">${esc(r.time)}</div><button class="ghost" onclick="removeRecord(${r.id})">✕</button></div>
+      <div class="log-place">📍 ${esc(place)}</div>
+      <div class="log-task">${items.map(x=>`<div>・${esc(x)}</div>`).join("")}</div>
+      ${r.photoCount?`<button class="photo-link" onclick="showPhotos(${r.id})">📷 写真を見る（${r.photoCount}枚）</button>`:""}`;
+    recordsEl.appendChild(d);
+  });
+}
+async function removeRecord(id){if(!confirm("この記録を削除しますか？"))return;records=records.filter(r=>r.id!==id);await deletePhotos(id);renderRecords();save()}
+async function showPhotos(id){const rows=await photosFor(id);photoModalContent.innerHTML="";if(!rows.length)photoModalContent.innerHTML="<p>写真がありません。</p>";rows.forEach(r=>{const url=URL.createObjectURL(r.blob),wrap=document.createElement("div");wrap.dataset.url=url;wrap.innerHTML=`<img src="${url}" alt="${esc(r.name)}"><div class="meta">${esc(r.name)}</div>`;photoModalContent.appendChild(wrap)});photoModal.classList.add("open")}
+function closePhotoModal(){photoModalContent.querySelectorAll("[data-url]").forEach(x=>URL.revokeObjectURL(x.dataset.url));photoModalContent.innerHTML="";photoModal.classList.remove("open")}
+
+function openDataMenu(){dataMenu.classList.add("open")}
+function closeDataMenu(){dataMenu.classList.remove("open")}
+function packageData(){return{version:"eri-field-v2",exportedAt:new Date().toISOString(),records,actions}}
+async function exportPackage(){
+  if(!records.length){alert("記録がありません。");return}
+  if(typeof JSZip==="undefined"){alert("ZIP機能を読み込めません。ネット接続後に一度アプリを開いてください。");return}
+  const zip=new JSZip();zip.file("trip_records.json",JSON.stringify(packageData(),null,2));const folder=zip.folder("photos");
+  for(const r of records){const rows=await photosFor(r.id);rows.forEach((p,i)=>folder.file(`${r.id}_${i+1}_${p.name}`,p.blob))}
+  const blob=await zip.generateAsync({type:"blob"});downloadBlob(blob,`trip_records_${new Date().toISOString().slice(0,10)}.zip`);closeDataMenu();
+}
+function downloadJson(){downloadBlob(new Blob([JSON.stringify(packageData(),null,2)],{type:"application/json"}),`trip_records_${new Date().toISOString().slice(0,10)}.json`);closeDataMenu()}
+function downloadBlob(blob,name){const u=URL.createObjectURL(blob),a=document.createElement("a");a.href=u;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(u),1000)}
+
+importPackageInput.addEventListener("change",async e=>{
+  const f=e.target.files?.[0];if(!f)return;
+  try{
+    let data,zip=null;if(f.name.toLowerCase().endsWith(".zip")){zip=await JSZip.loadAsync(f);const jf=zip.file("trip_records.json");if(!jf)throw new Error();data=JSON.parse(await jf.async("string"))}else data=JSON.parse(await f.text());
+    if(!Array.isArray(data.records))throw new Error();
+    if(!confirm(`${data.records.length}件を読み込み、現在の記録を置き換えますか？`))return;
+    await clearPhotoDB();records=data.records;actions=Array.isArray(data.actions)?data.actions:[...DEFAULT_ACTIONS];idCounter=records.reduce((m,r)=>Math.max(m,Number(r.id)||0),-1)+1;
+    if(zip){for(const pf of Object.values(zip.files).filter(x=>!x.dir&&x.name.startsWith("photos/"))){const base=pf.name.split("/").pop(),m=base.match(/^(\d+)_\d+_(.*)$/);if(!m)continue;const rid=Number(m[1]),name=m[2],blob=await pf.async("blob");await storePhotos(rid,[new File([blob],name,{type:blob.type||"image/jpeg"})])}}
+    selectedActions=[];pendingPhotos=[];renderActions();renderPhotoStatus();renderRecords();save();closeDataMenu();
+  }catch(err){console.error(err);alert("読み込みに失敗しました。")}
+  e.target.value="";
+});
+async function clearAllData(){if(!confirm("全記録とアプリ内写真を削除しますか？"))return;records=[];idCounter=0;selectedActions=[];pendingPhotos=[];note.value="";locationLabel.value="";await clearPhotoDB();renderActions();renderPhotoStatus();renderRecords();save();closeDataMenu()}
+
+note.addEventListener("input",save);locationLabel.addEventListener("input",save);
+
+
+function diagRow(label,status,detail=""){
+  const ok=status==="ok", warn=status==="warn";
+  const mark=ok?"✓":warn?"△":"×";
+  const color=ok?"#047857":warn?"#b45309":"#b91c1c";
+  return `<div style="border:1px solid #e5e7eb;border-radius:12px;padding:10px;background:#fff">
+    <div style="display:flex;gap:8px;align-items:flex-start">
+      <div style="font-weight:900;color:${color};min-width:18px">${mark}</div>
+      <div style="min-width:0">
+        <div style="font-weight:750;font-size:13px">${esc(label)}</div>
+        ${detail?`<div class="meta" style="margin-top:3px;word-break:break-all">${esc(detail)}</div>`:""}
+      </div>
+    </div>
+  </div>`;
+}
+
+function geoErrorName(code){
+  if(code===1)return "PERMISSION_DENIED";
+  if(code===2)return "POSITION_UNAVAILABLE";
+  if(code===3)return "TIMEOUT";
+  return `UNKNOWN(${code})`;
+}
+
+async function getGeoPermissionState(){
+  try{
+    if(!navigator.permissions?.query)return "取得不可";
+    const p=await navigator.permissions.query({name:"geolocation"});
+    return p.state;
+  }catch(e){
+    return "取得不可";
+  }
+}
+
+function oneShotPosition(timeout=10000){
+  return new Promise((resolve,reject)=>{
+    if(!navigator.geolocation)return reject({code:0,message:"Geolocation API unsupported"});
+    navigator.geolocation.getCurrentPosition(
+      resolve,
+      reject,
+      {enableHighAccuracy:true,timeout,maximumAge:0}
+    );
+  });
+}
+
+async function manifestCheck(){
+  try{
+    const link=document.querySelector('link[rel="manifest"]');
+    if(!link)return {ok:false,detail:"manifest link がありません"};
+    const url=new URL(link.href,location.href);
+    const r=await fetch(url,{cache:"no-store"});
+    if(!r.ok)return {ok:false,detail:`manifest HTTP ${r.status}`};
+    const m=await r.json();
+    const hasName=Boolean(m.name||m.short_name);
+    const hasStart=Boolean(m.start_url);
+    const displayOk=["standalone","fullscreen","minimal-ui","window-controls-overlay"].includes(m.display);
+    const sizes=(m.icons||[]).map(i=>i.sizes||"").join(" ");
+    const iconOk=sizes.includes("192x192")&&sizes.includes("512x512");
+    const ok=hasName&&hasStart&&displayOk&&iconOk;
+    return {ok,detail:`name:${hasName?"○":"×"} / start_url:${hasStart?"○":"×"} / display:${m.display||"なし"} / icons:${iconOk?"○":"×"}`};
+  }catch(e){
+    return {ok:false,detail:`manifest 読込失敗: ${e.message||e}`};
+  }
+}
+
+async function serviceWorkerCheck(){
+  if(!("serviceWorker" in navigator))return {ok:false,detail:"Service Worker 非対応"};
+  try{
+    const reg=await navigator.serviceWorker.getRegistration();
+    if(!reg)return {ok:false,detail:"Service Worker 未登録"};
+    const controlled=Boolean(navigator.serviceWorker.controller);
+    return {ok:true,detail:`登録済み / このページを制御:${controlled?"○":"△（再読み込み後に○になる場合あり）"}`};
+  }catch(e){
+    return {ok:false,detail:`確認失敗: ${e.message||e}`};
+  }
+}
+
+function storageCheck(){
+  let localOk=false,idbOk=Boolean(window.indexedDB);
+  try{
+    const k="__diag_test__";
+    localStorage.setItem(k,"1");
+    localOk=localStorage.getItem(k)==="1";
+    localStorage.removeItem(k);
+  }catch(e){}
+  return {ok:localOk&&idbOk,detail:`localStorage:${localOk?"○":"×"} / IndexedDB:${idbOk?"○":"×"}`};
+}
+
+function displayModeCheck(){
+  const standalone=window.matchMedia?.("(display-mode: standalone)")?.matches || window.navigator.standalone===true;
+  return {ok:standalone,detail:standalone?"ホーム画面アプリとして起動中":"通常のブラウザタブで起動中"};
+}
+
+async function runDiagnosis(testGPS=true){
+  diagResults.innerHTML="";
+  diagSummary.textContent="診断中…";
+  if(diagInstallButton)diagInstallButton.style.display="none";
+
+  const protocol=location.protocol;
+  const secure=window.isSecureContext;
+  const geoApi=Boolean(navigator.geolocation);
+  const perm=await getGeoPermissionState();
+  const manifest=await manifestCheck();
+  const sw=await serviceWorkerCheck();
+  const storage=storageCheck();
+  const mode=displayModeCheck();
+
+  const rows=[];
+  rows.push(diagRow("現在のURL", protocol==="https:"||location.hostname==="localhost"?"ok":"bad", location.href));
+  rows.push(diagRow("安全な接続（Secure Context）", secure?"ok":"bad",
+    secure?"HTTPS/localhost等の安全な環境です":"安全な接続ではありません。GPS・Service Worker・PWAに制限が出ます"));
+  rows.push(diagRow("位置情報API",geoApi?"ok":"bad",geoApi?"利用可能":"この環境では navigator.geolocation が使えません"));
+  rows.push(diagRow("位置情報の権限",perm==="granted"?"ok":perm==="prompt"?"warn":"bad",`状態: ${perm}`));
+  rows.push(diagRow("Web App Manifest",manifest.ok?"ok":"bad",manifest.detail));
+  rows.push(diagRow("Service Worker",sw.ok?"ok":"bad",sw.detail));
+  rows.push(diagRow("ローカル保存",storage.ok?"ok":"bad",storage.detail));
+  rows.push(diagRow("表示モード",mode.ok?"ok":"warn",mode.detail));
+
+  const installable=Boolean(deferredInstall);
+  rows.push(diagRow("ChromeのPWA判定",installable?"ok":"warn",
+    installable
+      ?"beforeinstallprompt を受信済み。インストール可能です"
+      :"インストール判定イベント未受信。すでにインストール済み、条件未達、または現在の開き方がPWA向きでない可能性があります"));
+
+  if(testGPS && geoApi){
+    rows.push(diagRow("GPS実測テスト","warn","現在地を1回取得しています…"));
+    diagResults.innerHTML=rows.join("");
+    try{
+      const p=await oneShotPosition(12000);
+      rows[rows.length-1]=diagRow("GPS実測テスト","ok",
+        `取得成功: ${p.coords.latitude.toFixed(6)}, ${p.coords.longitude.toFixed(6)} / 精度 約${Math.round(p.coords.accuracy)}m`);
+    }catch(e){
+      const code=geoErrorName(e.code);
+      rows[rows.length-1]=diagRow("GPS実測テスト","bad",`${code}: ${e.message||"取得失敗"}`);
+    }
+  }
+
+  diagResults.innerHTML=rows.join("");
+
+  const blockers=[];
+  if(!secure)blockers.push("HTTPS/localhostで開いていない");
+  if(!manifest.ok)blockers.push("Manifestの条件未達または読込不可");
+  if(!sw.ok)blockers.push("Service Worker未登録");
+  if(perm==="denied")blockers.push("位置情報が拒否されている");
+
+  if(blockers.length){
+    diagSummary.innerHTML=`<b style="color:#b91c1c">要修正：</b> ${blockers.map(esc).join(" / ")}`;
+  }else if(installable){
+    diagSummary.innerHTML=`<b style="color:#047857">PWAインストール可能。</b> GPS結果は下を確認してください。`;
+  }else{
+    diagSummary.innerHTML=`<b style="color:#b45309">基本条件は概ね正常。</b> Chromeのインストール判定だけ未受信です。URL直開き・ChatGPT内表示・既インストール等を確認してください。`;
+  }
+
+  if(diagInstallButton && deferredInstall)diagInstallButton.style.display="block";
+}
+
+function openDiagnosis(){
+  diagnosisMenu.classList.add("open");
+  runDiagnosis(true);
+}
+function closeDiagnosis(){diagnosisMenu.classList.remove("open")}
+async function installFromDiagnosis(){
+  if(!deferredInstall){
+    alert("Chromeからインストール可能判定を受け取っていません。診断結果を確認してください。");
+    return;
+  }
+  deferredInstall.prompt();
+  await deferredInstall.userChoice;
+  deferredInstall=null;
+  diagInstallButton.style.display="none";
+  installBanner.classList.remove("show");
+}
+
+window.addEventListener("beforeinstallprompt",e=>{e.preventDefault();deferredInstall=e;installBanner.classList.add("show")});
+async function installApp(){if(!deferredInstall)return;deferredInstall.prompt();await deferredInstall.userChoice;deferredInstall=null;installBanner.classList.remove("show")}
+window.addEventListener("appinstalled",()=>installBanner.classList.remove("show"));
+
+if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("./sw.js").catch(console.warn))}
+document.addEventListener("visibilitychange",()=>{if(!document.hidden)startGPS(false)});
+
+load();renderActions();renderRecords();renderPhotoStatus();startGPS(false);
+</script>
+</body>
+</html>
