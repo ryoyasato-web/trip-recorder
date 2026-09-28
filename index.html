@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="現場記録">
-<title>出張現場記録 v0.6.2</title>
+<title>出張現場記録 v0.7.0</title>
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="apple-touch-icon" href="./icon-192.png">
 <script src="https://cdn.jsdelivr.net/npm/exif-js"></script>
@@ -77,7 +77,7 @@ input:focus,textarea:focus{border-color:#60a5fa;box-shadow:0 0 0 3px #dbeafe}
 <header>
   <div class="header-row">
     <div>
-      <div class="title">出張現場記録 <span style="font-size:11px;font-weight:500;color:#bfdbfe">v0.6.2</span></div>
+      <div class="title">出張現場記録 <span style="font-size:11px;font-weight:500;color:#bfdbfe">v0.7.0</span></div>
       <div id="clock" class="sub"></div>
     </div>
     <div class="header-actions">
@@ -182,7 +182,7 @@ input:focus,textarea:focus{border-color:#60a5fa;box-shadow:0 0 0 3px #dbeafe}
   <div class="sheet">
     <div class="sheet-title"><span>Dropbox同期</span><button class="ghost" onclick="closeDropboxMenu()">✕</button></div>
     <div class="meta" style="margin-top:0">
-      Dropboxには写真本体を送らず、時刻・GPS・作業内容・メモ・写真撮影時刻などの記録情報だけを保存します。
+      Dropboxには写真本体を送らず、記録情報だけを保存します。今回の出張用データに加えて、過去の生記録を消さずに蓄積する保管庫にも同期します。
     </div>
     <label style="display:block;font-size:12px;font-weight:700;margin-top:12px">Dropbox App key</label>
     <input id="dropbox-app-key" style="margin-top:5px" placeholder="Dropbox Developer Console の App key">
@@ -394,6 +394,7 @@ async function clearAllData(){if(!confirm("全記録とアプリ内写真を削�
 
 // ---------- Dropbox同期（写真本体は送信しない） ----------
 const DROPBOX_FILE="/trip_records.json";
+const DROPBOX_MASTER_FILE="/master_records.json";
 const DROPBOX_APP_KEY_KEY="eri_dropbox_app_key";
 const DROPBOX_ACCESS_KEY="eri_dropbox_access_token";
 const DROPBOX_REFRESH_KEY="eri_dropbox_refresh_token";
@@ -526,14 +527,14 @@ function dropboxErrorMessage(e){
   if(e?.message && !parts.some(x=>String(x).includes(e.message))) parts.push(e.message);
   return parts.filter(Boolean).join(" / ") || "Dropbox API error";
 }
-async function uploadDropboxJson(token,data){
-  // 公式Dropbox JavaScript SDKを使う。ブラウザ固有のCORS処理はSDK側に任せる。
+async function uploadDropboxJsonPath(token,path,data){
+  // 公式Dropbox JavaScript SDKを使う。写真本体はここには送らない。
   if(!window.Dropbox?.Dropbox) throw new Error("Dropbox公式SDKを読み込めません。通信状態を確認してください。");
   const dbx=new window.Dropbox.Dropbox({accessToken:token});
   const contents=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
   try{
     const res=await dbx.filesUpload({
-      path:DROPBOX_FILE,
+      path,
       contents,
       mode:"overwrite",
       autorename:false,
@@ -546,6 +547,45 @@ async function uploadDropboxJson(token,data){
     throw new Error(dropboxErrorMessage(e));
   }
 }
+async function uploadDropboxJson(token,data){
+  return uploadDropboxJsonPath(token,DROPBOX_FILE,data);
+}
+
+async function downloadDropboxJsonFile(token,path,allowMissing=false){
+  if(!window.Dropbox?.Dropbox) throw new Error("Dropbox公式SDKを読み込めません。通信状態を確認してください。");
+  const dbx=new window.Dropbox.Dropbox({accessToken:token});
+  try{
+    const res=await dbx.filesDownload({path});
+    const data=res?.result||res;
+    const blob=data.fileBlob||data.fileBinary;
+    if(!blob)throw new Error("Dropboxから取得したファイル本文を読み取れませんでした");
+    const text=blob instanceof Blob?await blob.text():String(blob);
+    return JSON.parse(text);
+  }catch(e){
+    const msg=dropboxErrorMessage(e);
+    if(allowMissing&&/not_found/i.test(msg))return null;
+    throw new Error(msg);
+  }
+}
+function mergeMasterRecords(existing,currentPackage){
+  const base=existing&&Array.isArray(existing.records)?existing.records:[];
+  const incoming=Array.isArray(currentPackage?.records)?currentPackage.records:[];
+  const map=new Map();
+  const keyFor=(r,i)=>String(r?.uid||r?.sourceSyncId||r?.createdAt||(`${r?.time||"unknown"}#${r?.id??i}`));
+  base.forEach((r,i)=>map.set(keyFor(r,i),r));
+  incoming.forEach((r,i)=>{
+    const key=keyFor(r,i),old=map.get(key);
+    if(!old){map.set(key,r);return}
+    const oldTs=Date.parse(old.updatedAt||old.createdAt||"")||0;
+    const newTs=Date.parse(r.updatedAt||r.createdAt||"")||0;
+    if(newTs>=oldTs)map.set(key,r);
+  });
+  return{
+    version:"eri-master-records-v1",
+    updatedAt:new Date().toISOString(),
+    records:[...map.values()].sort((a,b)=>String(a.time||"").localeCompare(String(b.time||"")))
+  };
+}
 async function syncDropboxNow(showMessage=false){
   if(dropboxSyncing)return;
   if(!navigator.onLine){markDropboxDirty();setDropboxStatus("オフラインです。通信復帰後に同期します。","warn");return}
@@ -557,11 +597,17 @@ async function syncDropboxNow(showMessage=false){
   dropboxSyncing=true;renderDropboxChip();setDropboxStatus("Dropboxへ同期中…");
   try{
     const token=await getDropboxAccessToken();
-    await uploadDropboxJson(token,packageData());
+    const current=packageData();
+    // 今回の出張用スナップショットは従来どおり保存
+    await uploadDropboxJson(token,current);
+    // 長期保管庫は削除せず、UID単位で追加・更新する
+    const oldMaster=await downloadDropboxJsonFile(token,DROPBOX_MASTER_FILE,true);
+    const master=mergeMasterRecords(oldMaster,current);
+    await uploadDropboxJsonPath(token,DROPBOX_MASTER_FILE,master);
     clearDropboxDirty();
     const t=nowText(true);
     localStorage.setItem("eri_dropbox_last_sync",t);
-    setDropboxStatus(`同期済み：${t} / ${records.length}件`,"ok");
+    setDropboxStatus(`同期済み：${t} / 今回 ${records.length}件・保管庫 ${master.records.length}件`,"ok");
     if(showMessage)toast("☁ Dropbox同期完了");
   }catch(e){
     console.error(e);markDropboxDirty();setDropboxStatus(`同期失敗：${e.message||e}`,"bad");
