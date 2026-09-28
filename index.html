@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="現場記録">
-<title>出張現場記録 v0.5</title>
+<title>出張現場記録 v0.6</title>
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="apple-touch-icon" href="./icon-192.png">
 <script src="https://cdn.jsdelivr.net/npm/exif-js"></script>
@@ -76,11 +76,12 @@ input:focus,textarea:focus{border-color:#60a5fa;box-shadow:0 0 0 3px #dbeafe}
 <header>
   <div class="header-row">
     <div>
-      <div class="title">出張現場記録 <span style="font-size:11px;font-weight:500;color:#bfdbfe">v0.5</span></div>
+      <div class="title">出張現場記録 <span style="font-size:11px;font-weight:500;color:#bfdbfe">v0.6</span></div>
       <div id="clock" class="sub"></div>
     </div>
     <div class="header-actions">
       <button id="gps-chip" class="chip" onclick="startGPS(true)">📍 GPS準備中</button>
+      <button id="dropbox-chip" class="chip" onclick="openDropboxMenu()">☁ 未設定</button>
       <button class="chip" onclick="openDiagnosis()">診断</button>
       <button class="chip" onclick="openDataMenu()">データ</button>
     </div>
@@ -175,6 +176,28 @@ input:focus,textarea:focus{border-color:#60a5fa;box-shadow:0 0 0 3px #dbeafe}
   </div>
 </div>
 
+
+<div id="dropbox-menu" class="sheet-bg" onclick="if(event.target===this)closeDropboxMenu()">
+  <div class="sheet">
+    <div class="sheet-title"><span>Dropbox同期</span><button class="ghost" onclick="closeDropboxMenu()">✕</button></div>
+    <div class="meta" style="margin-top:0">
+      Dropboxには写真本体を送らず、時刻・GPS・作業内容・メモ・写真撮影時刻などの記録情報だけを保存します。
+    </div>
+    <label style="display:block;font-size:12px;font-weight:700;margin-top:12px">Dropbox App key</label>
+    <input id="dropbox-app-key" style="margin-top:5px" placeholder="Dropbox Developer Console の App key">
+    <button class="sheet-btn" style="text-align:center" onclick="saveDropboxAppKey()">App keyを保存</button>
+    <button class="sheet-btn primary" onclick="connectDropbox()">Dropboxに接続</button>
+    <button class="sheet-btn" style="text-align:center" onclick="syncDropboxNow(true)">今すぐ同期</button>
+    <div id="dropbox-status" class="meta" style="padding:10px;border-radius:10px;background:#f9fafb;border:1px solid #e5e7eb">
+      未設定
+    </div>
+    <button class="sheet-btn danger" onclick="disconnectDropbox()">Dropbox接続を解除</button>
+    <div class="meta">
+      認証はPKCE方式です。App secretは使いません。自動同期を維持するため、この端末のブラウザ内にDropboxの更新用トークンを保存します。
+    </div>
+  </div>
+</div>
+
 <div id="data-menu" class="sheet-bg" onclick="if(event.target===this)closeDataMenu()">
   <div class="sheet">
     <div class="sheet-title"><span>データ管理</span><button class="ghost" onclick="closeDataMenu()">✕</button></div>
@@ -198,7 +221,7 @@ input:focus,textarea:focus{border-color:#60a5fa;box-shadow:0 0 0 3px #dbeafe}
 </div>
 
 <script>
-const STORAGE_KEY="eri_field_recorder_v05";
+const STORAGE_KEY="eri_field_recorder_v06";
 const LEGACY_KEY="eri_field_recorder_v02";
 const DB_NAME="eri_field_photos_v05";
 const STORE="photos";
@@ -213,12 +236,13 @@ const qa=$("quick-actions"),note=$("note"),photoInput=$("photo-input"),locationL
 recordCount=$("record-count"),dataMenu=$("data-menu"),importPackageInput=$("import-package"),
 photoModal=$("photo-modal"),photoModalContent=$("photo-modal-content"),installBanner=$("install-banner"),
 diagnosisMenu=$("diagnosis-menu"),diagResults=$("diag-results"),diagSummary=$("diag-summary"),diagInstallButton=$("diag-install-button"),
-editMenu=$("edit-menu"),editActionsEl=$("edit-actions"),editNote=$("edit-note"),editLocation=$("edit-location"),editPhotoMeta=$("edit-photo-meta"),editPhotoInput=$("edit-photo-input");
+editMenu=$("edit-menu"),editActionsEl=$("edit-actions"),editNote=$("edit-note"),editLocation=$("edit-location"),editPhotoMeta=$("edit-photo-meta"),editPhotoInput=$("edit-photo-input"),
+dropboxMenu=$("dropbox-menu"),dropboxChip=$("dropbox-chip"),dropboxAppKeyInput=$("dropbox-app-key"),dropboxStatus=$("dropbox-status");
 
 function esc(v){return String(v??"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;")}
 function nowText(sec=false){const d=new Date();return `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,"0")}/${String(d.getDate()).padStart(2,"0")} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}${sec?":"+String(d.getSeconds()).padStart(2,"0"):""}`}
 function parseExifDate(v){const m=String(v||"").match(/^(\d{4}):(\d{2}):(\d{2})\s+(\d{2}):(\d{2}):(\d{2})/);if(!m)return null;const d=new Date(+m[1],+m[2]-1,+m[3],+m[4],+m[5],+m[6]);return Number.isNaN(d.getTime())?null:d}
-function migrateRecord(r){const photos=Array.isArray(r.photos)?r.photos:(Array.isArray(r.photoNames)?r.photoNames.map(n=>({name:n,takenAt:r.time||""})):[]);return {...r,time:r.time||nowText(true),actions:Array.isArray(r.actions)?r.actions:[],note:r.note||"",photos,photoCount:photos.length||Number(r.photoCount)||0,photoNames:photos.length?photos.map(p=>p.name):(r.photoNames||[])};}
+function migrateRecord(r){const photos=Array.isArray(r.photos)?r.photos:(Array.isArray(r.photoNames)?r.photoNames.map(n=>({name:n,takenAt:r.time||""})):[]);return {...r,time:r.time||nowText(true),actions:Array.isArray(r.actions)?r.actions:[],note:r.note||"",photos,photoCount:photos.length||Number(r.photoCount)||0,photoNames:photos.length?photos.map(p=>p.name):(r.photoNames||[]),updatedAt:r.updatedAt||r.createdAt||new Date().toISOString()};}
 function tick(){ $("clock").textContent=nowText(true); renderGPS(); }
 setInterval(tick,1000);tick();
 
@@ -227,7 +251,7 @@ function save(){
 }
 function load(){
   try{
-    const raw=localStorage.getItem(STORAGE_KEY)||localStorage.getItem("eri_field_recorder_v04")||localStorage.getItem("eri_field_recorder_v03")||localStorage.getItem(LEGACY_KEY);if(!raw)return;
+    const raw=localStorage.getItem(STORAGE_KEY)||localStorage.getItem("eri_field_recorder_v05")||localStorage.getItem("eri_field_recorder_v04")||localStorage.getItem("eri_field_recorder_v03")||localStorage.getItem(LEGACY_KEY);if(!raw)return;
     const d=JSON.parse(raw);
     if(Array.isArray(d.actions))actions=d.actions;
     if(Array.isArray(d.selectedActions))selectedActions=d.selectedActions;
@@ -254,8 +278,15 @@ function resetActions(){if(confirm("作業ボタンを標準状態に戻しま�
 function currentGpsSnapshot(){const age=gpsAge(),ok=latestGPS.lat!==null&&age<5*60*1000;return ok?{lat:latestGPS.lat,lng:latestGPS.lng,gpsAccuracy:latestGPS.accuracy,gpsAgeSec:Math.round(age/1000)}:{lat:null,lng:null,gpsAccuracy:null,gpsAgeSec:null}}
 function exifMeta(file){return new Promise(resolve=>{const fallback=file.lastModified?new Date(file.lastModified):new Date();const finish=d=>resolve({name:file.name||"photo.jpg",takenAt:`${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,"0")}/${String(d.getDate()).padStart(2,"0")} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}:${String(d.getSeconds()).padStart(2,"0")}`});if(typeof EXIF==="undefined"){finish(fallback);return}try{EXIF.getData(file,function(){finish(parseExifDate(EXIF.getTag(this,"DateTimeOriginal"))||parseExifDate(EXIF.getTag(this,"DateTimeDigitized"))||fallback)})}catch(e){finish(fallback)}})}
 photoInput.addEventListener("change",async e=>{const files=[...(e.target.files||[])].filter(f=>f.type.startsWith("image/"));e.target.value="";for(const f of files)await createPhotoRecord(f)});
-async function createPhotoRecord(file){const meta=await exifMeta(file),id=idCounter++,gps=currentGpsSnapshot();const rec={id,uid:crypto.randomUUID?crypto.randomUUID():`${Date.now()}-${id}`,createdAt:new Date().toISOString(),time:meta.takenAt,location:locationLabel.value.trim(),...gps,actions:[],note:"",photos:[meta],photoCount:1,photoNames:[meta.name],kind:"photo"};records.push(rec);try{await storePhotos(id,[file])}catch(e){console.warn(e)}save();renderRecords();if(navigator.vibrate)navigator.vibrate(60);alert(`写真を自動記録しました
-${meta.takenAt}`)}
+async function createPhotoRecord(file){
+  const meta=await exifMeta(file),id=idCounter++,gps=currentGpsSnapshot(),iso=new Date().toISOString();
+  const rec={id,uid:crypto.randomUUID?crypto.randomUUID():`${Date.now()}-${id}`,createdAt:iso,updatedAt:iso,time:meta.takenAt,location:locationLabel.value.trim(),...gps,actions:[],note:"",photos:[meta],photoCount:1,photoNames:[meta.name],kind:"photo"};
+  records.push(rec);
+  try{await storePhotos(id,[file])}catch(e){console.warn(e)}
+  save();markDropboxDirty();renderRecords();scheduleDropboxSync();
+  if(navigator.vibrate)navigator.vibrate(60);
+  toast(`📷 ${meta.takenAt.split(" ").pop()} を記録`);
+}
 
 function gpsAge(){return latestGPS.time?Math.max(0,Date.now()-latestGPS.time):Infinity}
 function renderGPS(){
@@ -287,8 +318,9 @@ async function clearPhotoDB(){try{const db=await openDB();await new Promise((res
 async function createManualRecord(){
   const memo=note.value.trim();if(!selectedActions.length&&!memo){alert("作業内容かメモを入力してください。");return}
   const id=idCounter++,gps=currentGpsSnapshot();
-  records.push({id,uid:crypto.randomUUID?crypto.randomUUID():`${Date.now()}-${id}`,createdAt:new Date().toISOString(),time:nowText(true),location:locationLabel.value.trim(),...gps,actions:[...selectedActions],note:memo,photos:[],photoCount:0,photoNames:[],kind:"manual"});
-  selectedActions=[];note.value="";renderActions();renderRecords();save();if(navigator.vibrate)navigator.vibrate(50);
+  const iso=new Date().toISOString();
+  records.push({id,uid:crypto.randomUUID?crypto.randomUUID():`${Date.now()}-${id}`,createdAt:iso,updatedAt:iso,time:nowText(true),location:locationLabel.value.trim(),...gps,actions:[...selectedActions],note:memo,photos:[],photoCount:0,photoNames:[],kind:"manual"});
+  selectedActions=[];note.value="";renderActions();renderRecords();save();markDropboxDirty();scheduleDropboxSync();if(navigator.vibrate)navigator.vibrate(50);
 }
 function recordKind(r){const hasPhoto=(r.photos?.length||r.photoCount)>0,hasText=(r.actions?.length||0)>0||Boolean(r.note);return hasPhoto&&hasText?"mixed":hasPhoto?"photo":"manual"}
 function renderRecords(){
@@ -309,15 +341,31 @@ function renderEditActions(rec){editActionsEl.innerHTML="";actions.forEach(a=>{c
 function openEdit(id){const rec=records.find(r=>r.id===id);if(!rec)return;editingId=id;$("edit-time").textContent=rec.time;editNote.value=rec.note||"";editLocation.value=rec.location||"";renderEditActions(rec);renderEditPhotoMeta(rec);editMenu.classList.add("open")}
 function closeEdit(){editingId=null;editMenu.classList.remove("open")}
 function renderEditPhotoMeta(rec){const ps=Array.isArray(rec.photos)?rec.photos:[];editPhotoMeta.innerHTML=ps.length?`📷 ${ps.length}枚<br>${ps.map(p=>`${esc(p.takenAt||"")}　${esc(p.name||"")}`).join("<br>")}`:"写真なし"}
-function saveEdit(){const rec=records.find(r=>r.id===editingId);if(!rec)return;rec.note=editNote.value.trim();rec.location=editLocation.value.trim();rec.kind=recordKind(rec);save();renderRecords();closeEdit()}
-editPhotoInput.addEventListener("change",async e=>{const rec=records.find(r=>r.id===editingId),files=[...(e.target.files||[])].filter(f=>f.type.startsWith("image/"));e.target.value="";if(!rec||!files.length)return;if(!Array.isArray(rec.photos))rec.photos=[];for(const file of files){const meta=await exifMeta(file);rec.photos.push(meta);await storePhotos(rec.id,[file])}rec.photoCount=rec.photos.length;rec.photoNames=rec.photos.map(p=>p.name);save();renderRecords();renderEditPhotoMeta(rec)});
-async function deleteEditingRecord(){if(editingId===null||!confirm("この記録を削除しますか？"))return;const id=editingId;records=records.filter(r=>r.id!==id);await deletePhotos(id);save();renderRecords();closeEdit()}
+function saveEdit(){const rec=records.find(r=>r.id===editingId);if(!rec)return;rec.note=editNote.value.trim();rec.location=editLocation.value.trim();rec.kind=recordKind(rec);rec.updatedAt=new Date().toISOString();save();markDropboxDirty();renderRecords();closeEdit();scheduleDropboxSync()}
+editPhotoInput.addEventListener("change",async e=>{const rec=records.find(r=>r.id===editingId),files=[...(e.target.files||[])].filter(f=>f.type.startsWith("image/"));e.target.value="";if(!rec||!files.length)return;if(!Array.isArray(rec.photos))rec.photos=[];for(const file of files){const meta=await exifMeta(file);rec.photos.push(meta);await storePhotos(rec.id,[file])}rec.photoCount=rec.photos.length;rec.photoNames=rec.photos.map(p=>p.name);rec.updatedAt=new Date().toISOString();save();markDropboxDirty();renderRecords();renderEditPhotoMeta(rec);scheduleDropboxSync()});
+async function deleteEditingRecord(){if(editingId===null||!confirm("この記録を削除しますか？"))return;const id=editingId;records=records.filter(r=>r.id!==id);await deletePhotos(id);save();markDropboxDirty();renderRecords();closeEdit();scheduleDropboxSync()}
 async function showPhotos(id){const rows=await photosFor(id);photoModalContent.innerHTML="";if(!rows.length)photoModalContent.innerHTML="<p>写真がありません。</p>";rows.forEach(r=>{const url=URL.createObjectURL(r.blob),wrap=document.createElement("div");wrap.dataset.url=url;wrap.innerHTML=`<img src="${url}" alt="${esc(r.name)}"><div class="meta">${esc(r.name)}</div>`;photoModalContent.appendChild(wrap)});photoModal.classList.add("open")}
 function closePhotoModal(){photoModalContent.querySelectorAll("[data-url]").forEach(x=>URL.revokeObjectURL(x.dataset.url));photoModalContent.innerHTML="";photoModal.classList.remove("open")}
 
+function toast(msg){const el=document.getElementById("toast");if(!el)return;el.textContent=msg;el.classList.add("show");clearTimeout(toast._t);toast._t=setTimeout(()=>el.classList.remove("show"),1800)}
 function openDataMenu(){dataMenu.classList.add("open")}
 function closeDataMenu(){dataMenu.classList.remove("open")}
-function packageData(){return{version:"eri-field-unified-v1",exportedAt:new Date().toISOString(),records,actions}}
+function packageData(){
+  return{
+    version:"eri-field-unified-v2",
+    exportedAt:new Date().toISOString(),
+    records:records.map(r=>({
+      id:r.id,uid:r.uid,createdAt:r.createdAt,updatedAt:r.updatedAt||r.createdAt||null,
+      time:r.time,location:r.location||"",lat:r.lat??null,lng:r.lng??null,gpsAccuracy:r.gpsAccuracy??null,gpsAgeSec:r.gpsAgeSec??null,
+      actions:Array.isArray(r.actions)?r.actions:[],note:r.note||"",
+      photos:(Array.isArray(r.photos)?r.photos:[]).map(p=>({name:p.name||"",takenAt:p.takenAt||r.time||""})),
+      photoCount:Array.isArray(r.photos)?r.photos.length:(Number(r.photoCount)||0),
+      photoNames:Array.isArray(r.photos)?r.photos.map(p=>p.name||""):(Array.isArray(r.photoNames)?r.photoNames:[]),
+      kind:recordKind(r)
+    })),
+    actions
+  };
+}
 async function exportPackage(){
   if(!records.length){alert("記録がありません。");return}
   if(typeof JSZip==="undefined"){alert("ZIP機能を読み込めません。ネット接続後に一度アプリを開いてください。");return}
@@ -336,11 +384,182 @@ importPackageInput.addEventListener("change",async e=>{
     if(!confirm(`${data.records.length}件を読み込み、現在の記録を置き換えますか？`))return;
     await clearPhotoDB();records=data.records;actions=Array.isArray(data.actions)?data.actions:[...DEFAULT_ACTIONS];idCounter=records.reduce((m,r)=>Math.max(m,Number(r.id)||0),-1)+1;
     if(zip){for(const pf of Object.values(zip.files).filter(x=>!x.dir&&x.name.startsWith("photos/"))){const base=pf.name.split("/").pop(),m=base.match(/^(\d+)_\d+_(.*)$/);if(!m)continue;const rid=Number(m[1]),name=m[2],blob=await pf.async("blob");await storePhotos(rid,[new File([blob],name,{type:blob.type||"image/jpeg"})])}}
-    selectedActions=[];pendingPhotos=[];renderActions();renderRecords();save();closeDataMenu();
+    selectedActions=[];renderActions();renderRecords();save();markDropboxDirty();scheduleDropboxSync();closeDataMenu();
   }catch(err){console.error(err);alert("読み込みに失敗しました。")}
   e.target.value="";
 });
-async function clearAllData(){if(!confirm("全記録とアプリ内写真を削除しますか？"))return;records=[];idCounter=0;selectedActions=[];note.value="";locationLabel.value="";await clearPhotoDB();renderActions();renderRecords();save();closeDataMenu()}
+async function clearAllData(){if(!confirm("全記録とアプリ内写真を削除しますか？"))return;records=[];idCounter=0;selectedActions=[];note.value="";locationLabel.value="";await clearPhotoDB();renderActions();renderRecords();save();markDropboxDirty();scheduleDropboxSync();closeDataMenu()}
+
+
+// ---------- Dropbox同期（写真本体は送信しない） ----------
+const DROPBOX_FILE="/trip_records.json";
+const DROPBOX_APP_KEY_KEY="eri_dropbox_app_key";
+const DROPBOX_ACCESS_KEY="eri_dropbox_access_token";
+const DROPBOX_REFRESH_KEY="eri_dropbox_refresh_token";
+const DROPBOX_EXPIRES_KEY="eri_dropbox_expires_at";
+const DROPBOX_DIRTY_KEY="eri_dropbox_dirty";
+let dropboxSyncTimer=null,dropboxSyncing=false;
+
+function dropboxRedirectUri(){
+  let p=location.pathname;
+  if(p.endsWith("/index.html"))p=p.slice(0,-"index.html".length);
+  return location.origin+p;
+}
+function getDropboxAppKey(){return (localStorage.getItem(DROPBOX_APP_KEY_KEY)||"").trim()}
+function setDropboxStatus(msg,kind=""){
+  if(dropboxStatus){
+    dropboxStatus.textContent=msg;
+    dropboxStatus.style.color=kind==="ok"?"#047857":kind==="bad"?"#b91c1c":kind==="warn"?"#b45309":"#6b7280";
+  }
+}
+function dropboxConnected(){return Boolean(localStorage.getItem(DROPBOX_REFRESH_KEY)||localStorage.getItem(DROPBOX_ACCESS_KEY))}
+function dropboxDirty(){return localStorage.getItem(DROPBOX_DIRTY_KEY)==="1"}
+function markDropboxDirty(){localStorage.setItem(DROPBOX_DIRTY_KEY,"1");renderDropboxChip()}
+function clearDropboxDirty(){localStorage.setItem(DROPBOX_DIRTY_KEY,"0");renderDropboxChip()}
+function renderDropboxChip(){
+  if(!dropboxChip)return;
+  if(!getDropboxAppKey()){dropboxChip.textContent="☁ 未設定";return}
+  if(!dropboxConnected()){dropboxChip.textContent="☁ 要接続";return}
+  if(dropboxSyncing){dropboxChip.textContent="☁ 同期中";return}
+  if(!navigator.onLine){dropboxChip.textContent=dropboxDirty()?"☁ 未同期":"☁ オフライン";return}
+  dropboxChip.textContent=dropboxDirty()?"☁ 未同期":"☁ 同期済み";
+}
+function openDropboxMenu(){
+  if(dropboxAppKeyInput)dropboxAppKeyInput.value=getDropboxAppKey();
+  setDropboxStatus(
+    !getDropboxAppKey()?"App keyを入力してください。":
+    !dropboxConnected()?"App key保存済み。Dropboxに接続してください。":
+    dropboxDirty()?"未同期の変更があります。":"Dropbox接続済み・同期済み",
+    dropboxConnected()?(dropboxDirty()?"warn":"ok"):""
+  );
+  dropboxMenu.classList.add("open");
+}
+function closeDropboxMenu(){dropboxMenu.classList.remove("open")}
+function saveDropboxAppKey(){
+  const key=(dropboxAppKeyInput?.value||"").trim();
+  if(!key){alert("App keyを入力してください。");return}
+  localStorage.setItem(DROPBOX_APP_KEY_KEY,key);
+  renderDropboxChip();setDropboxStatus("App keyを保存しました。次にDropboxへ接続してください。","ok");
+}
+function randomBase64Url(bytes=48){
+  const a=new Uint8Array(bytes);crypto.getRandomValues(a);
+  return btoa(String.fromCharCode(...a)).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+}
+async function sha256Base64Url(text){
+  const digest=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(text));
+  return btoa(String.fromCharCode(...new Uint8Array(digest))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"");
+}
+async function connectDropbox(){
+  const key=getDropboxAppKey();
+  if(!key){alert("先にApp keyを保存してください。");return}
+  if(!window.isSecureContext||!crypto?.subtle){alert("Dropbox認証にはHTTPSの安全な接続が必要です。");return}
+  const verifier=randomBase64Url(64),challenge=await sha256Base64Url(verifier),state=randomBase64Url(24);
+  sessionStorage.setItem("eri_dropbox_pkce_verifier",verifier);
+  sessionStorage.setItem("eri_dropbox_oauth_state",state);
+  const u=new URL("https://www.dropbox.com/oauth2/authorize");
+  u.searchParams.set("client_id",key);
+  u.searchParams.set("response_type","code");
+  u.searchParams.set("redirect_uri",dropboxRedirectUri());
+  u.searchParams.set("code_challenge",challenge);
+  u.searchParams.set("code_challenge_method","S256");
+  u.searchParams.set("token_access_type","offline");
+  u.searchParams.set("state",state);
+  location.href=u.toString();
+}
+async function handleDropboxRedirect(){
+  const q=new URLSearchParams(location.search),code=q.get("code"),state=q.get("state"),err=q.get("error");
+  if(err){
+    history.replaceState({},document.title,dropboxRedirectUri());
+    setDropboxStatus(`Dropbox認証に失敗しました：${q.get("error_description")||err}`,"bad");
+    return false;
+  }
+  if(!code)return false;
+  const key=getDropboxAppKey(),verifier=sessionStorage.getItem("eri_dropbox_pkce_verifier"),expected=sessionStorage.getItem("eri_dropbox_oauth_state");
+  if(!key||!verifier||!expected||state!==expected){
+    setDropboxStatus("Dropbox認証情報を確認できませんでした。もう一度接続してください。","bad");
+    return false;
+  }
+  setDropboxStatus("Dropbox認証を完了しています…");
+  const body=new URLSearchParams({
+    code,grant_type:"authorization_code",redirect_uri:dropboxRedirectUri(),code_verifier:verifier,client_id:key
+  });
+  const r=await fetch("https://api.dropboxapi.com/oauth2/token",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body});
+  const data=await r.json();
+  if(!r.ok)throw new Error(data.error_description||data.error||`HTTP ${r.status}`);
+  localStorage.setItem(DROPBOX_ACCESS_KEY,data.access_token);
+  localStorage.setItem(DROPBOX_EXPIRES_KEY,String(Date.now()+Number(data.expires_in||14400)*1000));
+  if(data.refresh_token)localStorage.setItem(DROPBOX_REFRESH_KEY,data.refresh_token);
+  sessionStorage.removeItem("eri_dropbox_pkce_verifier");sessionStorage.removeItem("eri_dropbox_oauth_state");
+  history.replaceState({},document.title,dropboxRedirectUri());
+  markDropboxDirty();
+  setDropboxStatus("Dropboxに接続しました。記録を同期します。","ok");
+  await syncDropboxNow(false);
+  return true;
+}
+async function getDropboxAccessToken(){
+  const key=getDropboxAppKey();
+  if(!key)throw new Error("Dropbox App keyが未設定です");
+  const token=localStorage.getItem(DROPBOX_ACCESS_KEY),expires=Number(localStorage.getItem(DROPBOX_EXPIRES_KEY)||0);
+  if(token && Date.now()<expires-60000)return token;
+  const refresh=localStorage.getItem(DROPBOX_REFRESH_KEY);
+  if(!refresh)throw new Error("Dropboxへの再接続が必要です");
+  const body=new URLSearchParams({grant_type:"refresh_token",refresh_token:refresh,client_id:key});
+  const r=await fetch("https://api.dropboxapi.com/oauth2/token",{method:"POST",headers:{"Content-Type":"application/x-www-form-urlencoded"},body});
+  const data=await r.json();
+  if(!r.ok)throw new Error(data.error_description||data.error||`HTTP ${r.status}`);
+  localStorage.setItem(DROPBOX_ACCESS_KEY,data.access_token);
+  localStorage.setItem(DROPBOX_EXPIRES_KEY,String(Date.now()+Number(data.expires_in||14400)*1000));
+  return data.access_token;
+}
+async function uploadDropboxJson(token,data){
+  const r=await fetch("https://content.dropboxapi.com/2/files/upload",{
+    method:"POST",
+    headers:{
+      "Authorization":`Bearer ${token}`,
+      "Content-Type":"application/octet-stream",
+      "Dropbox-API-Arg":JSON.stringify({path:DROPBOX_FILE,mode:"overwrite",autorename:false,mute:true,strict_conflict:false})
+    },
+    body:JSON.stringify(data)
+  });
+  if(!r.ok){
+    let msg=`HTTP ${r.status}`;try{const d=await r.json();msg=d.error_summary||msg}catch(e){}
+    throw new Error(msg);
+  }
+  return r.json();
+}
+async function syncDropboxNow(showMessage=false){
+  if(dropboxSyncing)return;
+  if(!navigator.onLine){markDropboxDirty();setDropboxStatus("オフラインです。通信復帰後に同期します。","warn");return}
+  if(!getDropboxAppKey()||!dropboxConnected()){
+    renderDropboxChip();
+    if(showMessage)setDropboxStatus("App keyを保存してDropboxへ接続してください。","warn");
+    return;
+  }
+  dropboxSyncing=true;renderDropboxChip();setDropboxStatus("Dropboxへ同期中…");
+  try{
+    const token=await getDropboxAccessToken();
+    await uploadDropboxJson(token,packageData());
+    clearDropboxDirty();
+    const t=nowText(true);
+    localStorage.setItem("eri_dropbox_last_sync",t);
+    setDropboxStatus(`同期済み：${t} / ${records.length}件`,"ok");
+    if(showMessage)toast("☁ Dropbox同期完了");
+  }catch(e){
+    console.error(e);markDropboxDirty();setDropboxStatus(`同期失敗：${e.message||e}`,"bad");
+  }finally{dropboxSyncing=false;renderDropboxChip()}
+}
+function scheduleDropboxSync(){
+  clearTimeout(dropboxSyncTimer);
+  dropboxSyncTimer=setTimeout(()=>syncDropboxNow(false),800);
+}
+function disconnectDropbox(){
+  if(!confirm("この端末のDropbox接続情報を削除しますか？ 記録データ自体は消えません。"))return;
+  [DROPBOX_ACCESS_KEY,DROPBOX_REFRESH_KEY,DROPBOX_EXPIRES_KEY].forEach(k=>localStorage.removeItem(k));
+  renderDropboxChip();setDropboxStatus("Dropbox接続を解除しました。","warn");
+}
+window.addEventListener("online",()=>{renderDropboxChip();if(dropboxDirty())scheduleDropboxSync()});
+window.addEventListener("offline",renderDropboxChip);
+
 
 note.addEventListener("input",save);locationLabel.addEventListener("input",save);
 
@@ -523,7 +742,9 @@ window.addEventListener("appinstalled",()=>installBanner.classList.remove("show"
 if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("./sw.js").catch(console.warn))}
 document.addEventListener("visibilitychange",()=>{if(!document.hidden)startGPS(false)});
 
-load();renderActions();renderRecords();startGPS(false);
+load();renderActions();renderRecords();renderDropboxChip();startGPS(false);
+handleDropboxRedirect().catch(e=>{console.error(e);setDropboxStatus(`Dropbox認証エラー：${e.message||e}`,"bad");renderDropboxChip()});
+if(dropboxConnected()&&dropboxDirty()&&navigator.onLine)scheduleDropboxSync();
 </script>
 </body>
 </html>

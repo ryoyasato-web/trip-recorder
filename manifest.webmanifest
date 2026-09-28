@@ -1,7 +1,7 @@
 {
   "name": "出張現場記録",
   "short_name": "現場記録",
-  "description": "写真・作業・メモを時刻とGPS付きの現場記録として一元化するPWA",
+  "description": "写真・作業・メモを時刻とGPS付きで記録し、Dropboxへ軽量同期するPWA",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",

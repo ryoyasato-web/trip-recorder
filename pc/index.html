@@ -1,0 +1,2139 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>出張メール・報告ジェネレーター PC v0.5 (ERI 総合観測室向け)</title>
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- EXIF.js for reading image metadata -->
+    <script src="https://cdn.jsdelivr.net/npm/exif-js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f3f4f6; }
+        .spinner {
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top: 3px solid #3b82f6;
+            width: 16px;
+            height: 16px;
+            animation: spin 1s linear infinite;
+            display: inline-block;
+            vertical-align: middle;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        /* カスタムスクロールバー */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; }
+        ::-webkit-scrollbar-thumb { background: #c1c1c1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #a8a8a8; }
+    </style>
+</head>
+<body class="text-gray-800 h-screen flex flex-col overflow-hidden">
+
+    <header class="bg-blue-800 text-white p-4 shadow-md flex-shrink-0 flex justify-between items-center">
+        <div>
+            <h1 class="text-xl font-bold">出張メール・報告ジェネレーター <span class="text-sm font-normal text-blue-200">PC v0.5</span></h1>
+            <p class="text-xs text-blue-200">スマホ現場記録を自動整理し、報告文まで生成</p>
+        </div>
+        <div class="flex items-center gap-3">
+            <span id="save-status" class="text-xs text-blue-200">自動保存: ON</span>
+            <button onclick="resetAll()" class="text-xs bg-blue-700 hover:bg-blue-600 border border-blue-500 px-3 py-1 rounded">新規作成</button>
+            <div class="text-sm hidden lg:block">東大地震研 技術部 総合観測室</div>
+        </div>
+    </header>
+
+    <main class="flex-1 flex flex-col md:flex-row overflow-hidden">
+        
+        <!-- 左側：入力・編集エリア -->
+        <div class="w-full md:w-1/2 lg:w-7/12 p-4 flex flex-col h-full overflow-y-auto bg-white border-r">
+            
+            <!-- タブ切り替え -->
+            <div class="flex border-b mb-4">
+                <button id="tab-plan" onclick="switchMode('plan')" class="flex-1 py-2 text-center font-bold border-b-2 border-blue-600 text-blue-600">出張予定メール作成</button>
+                <button id="tab-report" onclick="switchMode('report')" class="flex-1 py-2 text-center font-bold text-gray-500 hover:text-blue-500 border-b-2 border-transparent">出張報告メール作成</button>
+            </div>
+
+            <section class="mb-6">
+                <h2 class="text-lg font-bold text-gray-700 border-b pb-2 mb-3">1. 宛先・挨拶</h2>
+                <textarea id="input-intro"
+                    class="w-full p-2 border rounded focus:ring-2 focus:ring-blue-400 outline-none text-sm"
+                    rows="3">技術部、観測センターの皆様
+佐藤です。</textarea>
+            </section>
+            <section class="mb-6">
+                <h2 class="text-lg font-bold text-gray-700 border-b pb-2 mb-3 flex justify-between items-center">
+                    <span>2. 基本情報</span>
+                    <span id="validation-status" class="text-xs px-2 py-1 rounded bg-gray-100 text-gray-700">確認中</span>
+                </h2>
+                <p class="text-xs text-gray-500 mb-3">
+                    手入力のほか、同行者が作成した基本情報をそのまま貼り付けて取り込めます。
+                    「必須」を外すと未入力でも警告しません。宿泊先は初期状態で任意です。
+                </p>
+
+                <details class="mb-4 border rounded-lg bg-blue-50">
+                    <summary class="cursor-pointer select-none px-3 py-2 text-sm font-bold text-blue-800">
+                        📋 同行者のメール・基本情報を貼り付けて取り込む
+                    </summary>
+                    <div class="p-3 pt-1">
+                        <textarea id="basic-paste-input" rows="7"
+                            class="w-full p-2 border rounded bg-white text-sm font-mono"
+                            placeholder="例：&#10;日程　　：2026/10/5&#10;用務先　：○○観測点&#10;用務　　：観測点保守&#10;旅費　　：○○経費&#10;交通手段：公用車"></textarea>
+                        <p class="text-[11px] text-gray-500 mt-1">
+                            「項目名：内容」の形式を自動認識します。全角・半角の「：」に対応します。
+                        </p>
+                        <div class="mt-2 flex flex-wrap gap-2">
+                            <button onclick="importBasicInfoFromPaste('merge')"
+                                class="text-xs bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded">
+                                既存項目に反映
+                            </button>
+                            <button onclick="importBasicInfoFromPaste('replace')"
+                                class="text-xs bg-white hover:bg-gray-50 text-blue-700 border border-blue-300 px-3 py-2 rounded">
+                                貼り付け内容で置換
+                            </button>
+                            <button onclick="document.getElementById('basic-paste-input').value=''"
+                                class="text-xs bg-gray-100 hover:bg-gray-200 text-gray-600 px-3 py-2 rounded">
+                                クリア
+                            </button>
+                            <span id="paste-import-status" class="text-xs text-gray-500 self-center"></span>
+                        </div>
+                    </div>
+                </details>
+
+                <div id="basic-fields-container" class="space-y-2"></div>
+
+                <div class="mt-3 flex flex-wrap gap-2">
+                    <button onclick="addBasicField()" class="text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 px-3 py-2 rounded border border-blue-200">
+                        ＋ 項目を追加
+                    </button>
+                    <button onclick="resetBasicFields()" class="text-xs bg-gray-100 hover:bg-gray-200 text-gray-600 px-3 py-2 rounded border">
+                        標準項目に戻す
+                    </button>
+                </div>
+
+                <!-- 既存ロジックとの互換用。画面表示は上の可変項目を使用 -->
+                <textarea id="input-basic-info" class="hidden" aria-hidden="true"></textarea>
+
+                <div class="mt-3 p-2 bg-gray-50 rounded border text-xs">
+                    <p class="font-bold text-gray-600 mb-1">必須項目チェック:</p>
+                    <div id="check-list" class="flex flex-wrap gap-2"></div>
+                </div>
+            </section>
+
+            <!-- 予定メール用：安全留意事項 -->
+            <section id="section-safety" class="mb-6">
+                <h2 class="text-lg font-bold text-gray-700 border-b pb-2 mb-3">3. 作業に関する安全留意事項</h2>
+                <textarea id="input-safety" oninput="updatePreview(); saveDraft()" class="w-full p-2 border rounded focus:ring-2 focus:ring-blue-400 outline-none text-sm" rows="5">・安全運転を心がける。
+・出張前、作業前に天気予報等を確認する。
+・現場での怪我に備えて救急セットを用意する。</textarea>
+            </section>
+
+            <!-- 報告メール用：活動ログ -->
+            <div id="section-logs-container" style="display: none;">
+                <section class="mb-6">
+                    <h2 class="text-lg font-bold text-gray-700 border-b pb-2 mb-3">3. 現場記録を読み込む</h2>
+
+                    <div class="rounded-lg border border-sky-200 bg-sky-50 p-4 mb-3">
+                        <div class="font-bold text-sky-900 mb-1">☁ Dropboxから取得</div>
+                        <p class="text-[11px] text-gray-600 mb-3">
+                            スマホ版が同期した <code>/trip_records.json</code> を取得します。写真本体はDropboxに保存しません。
+                        </p>
+                        <label class="text-xs font-bold text-gray-700 block mb-1">Dropbox App key</label>
+                        <div class="flex flex-col sm:flex-row gap-2">
+                            <input id="dropbox-app-key" class="flex-1 border rounded p-2 text-sm bg-white" placeholder="Dropbox Developer Console の App key">
+                            <button onclick="saveDropboxAppKey()" class="bg-white border border-sky-300 text-sky-800 font-bold px-3 py-2 rounded">App key保存</button>
+                            <button onclick="connectDropbox()" class="bg-sky-700 hover:bg-sky-800 text-white font-bold px-3 py-2 rounded">Dropbox接続</button>
+                        </div>
+                        <button onclick="pullDropboxRecords(true)" class="mt-2 w-full bg-blue-700 hover:bg-blue-800 text-white font-bold px-4 py-2 rounded shadow">
+                            ☁ 最新の現場記録を取得
+                        </button>
+                        <div id="dropbox-status" class="text-xs text-gray-500 mt-2">未設定</div>
+                    </div>
+
+                    <details>
+                        <summary class="text-xs text-blue-700 cursor-pointer">手動JSON/ZIP読み込み（バックアップ）</summary>
+                        <div class="border-2 border-dashed border-blue-300 rounded-lg p-5 bg-blue-50 mt-2">
+                            <label class="block text-center cursor-pointer">
+                                <input id="field-package-input" type="file" accept=".zip,.json,application/zip,application/json" class="hidden">
+                                <div class="font-bold text-blue-700">📦 スマホの現場記録パッケージを読み込む</div>
+                                <div class="text-xs text-gray-500 mt-1">trip_records_*.zip / JSON</div>
+                            </label>
+                        </div>
+                    </details>
+                    <div id="field-package-status" class="text-xs text-gray-500 mt-2">未読込</div>
+                </section>
+
+                <section class="mb-6">
+                    <div class="flex flex-wrap items-center justify-between gap-2 border-b pb-2 mb-3">
+                        <h2 class="text-lg font-bold text-gray-700">4. 現場記録を自動整理</h2>
+                        <div class="flex items-center gap-2">
+                            <label class="text-xs text-gray-500">出力形式</label>
+                            <select id="report-style" class="text-xs border rounded px-2 py-1 bg-white" onchange="updatePreview(); saveDraft()">
+                                <option value="prose">文章形式</option>
+                                <option value="timeline">時系列・箇条書き</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="rounded-lg border bg-indigo-50 p-3">
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 items-end">
+                            <div>
+                                <label class="text-xs font-bold text-gray-700 block mb-1">同じ作業とみなす時間</label>
+                                <div class="flex items-center gap-1">
+                                    <input id="merge-minutes" type="number" min="1" max="180" value="30"
+                                        class="w-full border rounded p-2 text-sm bg-white">
+                                    <span class="text-xs text-gray-500">分</span>
+                                </div>
+                            </div>
+                            <div>
+                                <label class="text-xs font-bold text-gray-700 block mb-1">同じ場所とみなす距離</label>
+                                <div class="flex items-center gap-1">
+                                    <input id="merge-distance" type="number" min="10" max="10000" value="500"
+                                        class="w-full border rounded p-2 text-sm bg-white">
+                                    <span class="text-xs text-gray-500">m</span>
+                                </div>
+                            </div>
+                            <button onclick="buildEventsFromLogs(true)"
+                                class="bg-indigo-700 hover:bg-indigo-800 text-white font-bold px-4 py-2 rounded shadow">
+                                ✨ 自動整理・文章生成
+                            </button>
+                        </div>
+                        <p class="text-[11px] text-gray-600 mt-2">
+                            近い時刻・近い場所の記録をまとめます。「移動開始」は原則として区切りにします。整理後の文章は自由に修正できます。
+                        </p>
+                    </div>
+
+                    <div id="events-summary" class="text-xs text-gray-500 mt-2">まだ整理していません。</div>
+                    <div id="events-container" class="space-y-3 mt-3"></div>
+                </section>
+
+                <section class="mb-6">
+                    <h2 class="text-lg font-bold text-gray-700 border-b pb-2 mb-3">5. 補助データ取り込み</h2>
+                    <div class="grid grid-cols-1 lg:grid-cols-3 gap-3 mb-4">
+                        <div class="border rounded-lg p-3 bg-amber-50">
+                            <div class="font-bold text-sm text-amber-800 mb-1">① メモ</div>
+                            <p class="text-[11px] text-gray-600 mb-2">「9/24 10:30 観測点着」「11:00 バッテリー交換」のようなメモを時系列ログにします。</p>
+                            <textarea id="memo-input" rows="6" class="w-full p-2 text-sm border rounded bg-white" placeholder="例：&#10;9/24 09:30 観測点着&#10;10:00 バッテリー交換、SD回収&#10;12:15 次の観測点へ移動"></textarea>
+                            <button onclick="importMemo()" class="mt-2 w-full text-xs bg-amber-600 hover:bg-amber-700 text-white px-3 py-2 rounded">メモからログ生成</button>
+                        </div>
+
+                        <div class="border rounded-lg p-3 bg-blue-50">
+                            <div class="font-bold text-sm text-blue-800 mb-1">② 写真</div>
+                            <p class="text-[11px] text-gray-600 mb-2">元画像のExifから撮影時刻・GPSを読みます。Google Photos APIではGPSが取得できないため、元画像の読み込みを優先します。</p>
+                            <div class="text-[11px] text-blue-700">↓ 下の写真ドロップ欄を使用</div>
+                        </div>
+
+                        <div class="border rounded-lg p-3 bg-emerald-50">
+                            <div class="font-bold text-sm text-emerald-800 mb-1">③ Google Maps タイムライン</div>
+                            <p class="text-[11px] text-gray-600 mb-2">スマホから書き出した location-history.json / Timeline.json を読み、写真時刻の場所推定に使います。</p>
+                            <input type="file" id="timeline-input" accept=".json,application/json" class="w-full text-xs">
+                            <div id="timeline-status" class="mt-2 text-[11px] text-gray-500">未読込</div>
+                        </div>
+                    </div>
+
+                    <div class="rounded border bg-gray-50 p-3 text-xs text-gray-600">
+                        <span class="font-bold">統合方針：</span>
+                        メモ＝「何をしたか」、写真＝「いつ」、タイムライン＝「どこ」を補完し、同じ時間帯の情報を1つの活動ログへまとめます。
+                    </div>
+                </section>
+
+                <section class="mb-6">
+                    <h2 class="text-lg font-bold text-gray-700 border-b pb-2 mb-3">6. 写真から活動ログを抽出</h2>
+                    <p class="text-xs text-gray-500 mb-2">現地の写真をここにドロップすると、Exif情報から撮影日時とGPS位置を自動で追加します。画像そのものは外部サーバーへ送信しません。</p>
+                
+                <div id="drop-zone" class="border-2 border-dashed border-blue-300 rounded-lg p-8 text-center bg-blue-50 transition-colors cursor-pointer hover:bg-blue-100 relative">
+                    <input type="file" id="file-input" multiple accept="image/jpeg, image/png, image/heic" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer">
+                    <svg class="mx-auto h-10 w-10 text-blue-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
+                    <span class="text-blue-600 font-medium">写真をドラッグ＆ドロップ</span> またはクリックして選択
+                </div>
+            </section>
+
+            <section class="flex-1 flex flex-col min-h-[300px]">
+                <div class="flex justify-between items-center border-b pb-2 mb-3">
+                    <h2 class="text-lg font-bold text-gray-700">7. 元ログ（確認・修正）</h2>
+                    <button onclick="addManualLog()" class="text-xs bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-1 rounded shadow flex items-center gap-1">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+                        手動で追加
+                    </button>
+                </div>
+                
+                <div id="logs-container" class="space-y-3 flex-1">
+                    <!-- ログアイテムがここに動的に生成されます -->
+                    <div id="empty-state" class="text-center text-gray-400 py-10 text-sm">
+                        写真を追加するか、「手動で追加」ボタンから記録を開始してください。
+                    </div>
+                </div>
+            </section>
+            </div>
+        </div>
+
+        <!-- 右側：プレビュー・出力エリア -->
+        <div class="w-full md:w-1/2 lg:w-5/12 bg-gray-50 p-4 flex flex-col h-full border-t md:border-t-0">
+            <h2 class="text-lg font-bold text-gray-700 border-b pb-2 mb-3 flex justify-between items-center">
+                <span>出力プレビュー (Gmail用)</span>
+                <div class="flex items-center gap-2">
+                    <button onclick="updatePreview()" class="text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 px-2 py-1 rounded shadow-sm flex items-center gap-1 transition-colors">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                        手動更新
+                    </button>
+                    <span id="copy-status" class="text-sm text-green-600 font-normal hidden">コピーしました！</span>
+                </div>
+            </h2>
+            
+            <div class="mb-3">
+                <label class="text-xs text-gray-500 block mb-1">件名</label>
+                <input id="subject-text" type="text" class="w-full p-2 border border-gray-200 rounded bg-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-400" oninput="this.dataset.userEdited='1'; saveDraft()">
+            </div>
+            <textarea id="preview-text" class="flex-1 w-full p-4 border border-gray-200 rounded shadow-inner bg-white font-mono text-sm resize-none focus:outline-none focus:ring-1 focus:ring-blue-400" readonly></textarea>
+            
+            <div class="mt-4 flex gap-3 flex-shrink-0">
+                <button onclick="copyToClipboard()" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded shadow flex justify-center items-center gap-2 transition-colors">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"></path></svg>
+                    クリップボードにコピー
+                </button>
+                <button onclick="openGmail()" class="bg-red-500 hover:bg-red-600 text-white font-bold py-3 px-4 rounded shadow flex justify-center items-center gap-2 transition-colors">
+                    <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24"><path d="M24 5.457v13.909c0 .904-.732 1.636-1.636 1.636h-3.819V11.73L12 16.64l-6.545-4.91v9.273H1.636A1.636 1.636 0 0 1 0 19.366V5.457c0-2.023 2.309-3.178 3.927-1.943L12 8.568l8.073-5.054C21.691 2.279 24 3.434 24 5.457z"/></svg>
+                    Gmail作成
+                </button>
+            </div>
+        </div>
+    </main>
+
+
+    <div id="package-photo-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/70 p-4">
+        <div class="bg-white rounded-xl shadow-xl w-full max-w-5xl max-h-[92vh] flex flex-col overflow-hidden">
+            <div class="flex items-center justify-between border-b p-3">
+                <div>
+                    <h3 class="font-bold text-gray-800">現場記録の写真</h3>
+                    <div id="package-photo-title" class="text-xs text-gray-500"></div>
+                </div>
+                <button onclick="closePackagePhotos()" class="text-2xl text-gray-400 hover:text-gray-700 px-2">×</button>
+            </div>
+            <div id="package-photo-content" class="p-4 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"></div>
+        </div>
+    </div>
+
+    <script>
+        // アプリケーションの状態
+        let logs = [];
+        let logIdCounter = 0;
+        let events = [];
+        let eventIdCounter = 0;
+        let fieldPackageZip = null;
+        let fieldPackagePhotoIndex = new Map();
+        let currentMode = 'plan'; // 'plan' or 'report'
+        let timelinePoints = [];
+        let timelineVisits = [];
+
+        // 基本情報は出張ごとに増減可能
+        const defaultBasicFieldTemplates = [
+            { label: '日程', required: true },
+            { label: '用務先', required: true },
+            { label: '用務', required: true },
+            { label: '旅費', required: true },
+            { label: '交通手段', required: true },
+            { label: '宿泊先', required: false },
+            { label: '連絡先', required: false },
+            { label: '依頼教員', required: true },
+            { label: '依頼提出', required: true },
+            { label: '備考', required: false }
+        ];
+
+        let basicFieldIdCounter = 0;
+
+        function makeDefaultBasicFields() {
+            return defaultBasicFieldTemplates.map(item => ({
+                id: basicFieldIdCounter++,
+                label: item.label,
+                value: '',
+                required: item.required
+            }));
+        }
+
+        let basicFields = makeDefaultBasicFields();
+
+        const DEFAULT_PRESETS = {
+            "交通手段": ["公用車", "公共交通機関", "レンタカー", "航空機", "船舶"],
+            "宿泊先": ["なし"],
+            "依頼提出": ["提出済", "未提出"],
+            "旅費": []
+        };
+        let basicPresets = JSON.parse(JSON.stringify(DEFAULT_PRESETS));
+
+        // DOM要素
+        const tabPlan = document.getElementById('tab-plan');
+        const tabReport = document.getElementById('tab-report');
+        const sectionSafety = document.getElementById('section-safety');
+        const sectionLogsContainer = document.getElementById('section-logs-container');
+        
+        const inputIntro = document.getElementById('input-intro');
+        const inputBasicInfo = document.getElementById('input-basic-info');
+        const basicFieldsContainer = document.getElementById('basic-fields-container');
+        const basicPasteInput = document.getElementById('basic-paste-input');
+        const pasteImportStatus = document.getElementById('paste-import-status');
+        const inputSafety = document.getElementById('input-safety');
+        
+        const checkListContainer = document.getElementById('check-list');
+        const validationStatus = document.getElementById('validation-status');
+
+        const logsContainer = document.getElementById('logs-container');
+        const emptyState = document.getElementById('empty-state');
+        const previewText = document.getElementById('preview-text');
+        const subjectText = document.getElementById('subject-text');
+        const saveStatus = document.getElementById('save-status');
+        const dropZone = document.getElementById('drop-zone');
+        const fileInput = document.getElementById('file-input');
+        const memoInput = document.getElementById('memo-input');
+        const timelineInput = document.getElementById('timeline-input');
+        const timelineStatus = document.getElementById('timeline-status');
+        const fieldPackageInput = document.getElementById('field-package-input');
+        const fieldPackageStatus = document.getElementById('field-package-status');
+        const dropboxAppKeyInput = document.getElementById('dropbox-app-key');
+        const dropboxStatus = document.getElementById('dropbox-status');
+        const mergeMinutesInput = document.getElementById('merge-minutes');
+        const mergeDistanceInput = document.getElementById('merge-distance');
+        const reportStyleSelect = document.getElementById('report-style');
+        const eventsContainer = document.getElementById('events-container');
+        const eventsSummary = document.getElementById('events-summary');
+        const packagePhotoModal = document.getElementById('package-photo-modal');
+        const packagePhotoContent = document.getElementById('package-photo-content');
+        const packagePhotoTitle = document.getElementById('package-photo-title');
+
+        // イベントリスナーの登録
+        if (inputIntro) inputIntro.addEventListener('input', () => { updatePreview(); saveDraft(); });
+        if (memoInput) memoInput.addEventListener('input', saveDraft);
+        if (basicPasteInput) basicPasteInput.addEventListener('input', saveDraft);
+        if (mergeMinutesInput) mergeMinutesInput.addEventListener('change', saveDraft);
+        if (mergeDistanceInput) mergeDistanceInput.addEventListener('change', saveDraft);
+
+        function switchMode(mode) {
+            currentMode = mode;
+            if (mode === 'plan') {
+                tabPlan.className = "flex-1 py-2 text-center font-bold border-b-2 border-blue-600 text-blue-600";
+                tabReport.className = "flex-1 py-2 text-center font-bold text-gray-500 hover:text-blue-500 border-b-2 border-transparent";
+                sectionSafety.style.display = 'block';
+                sectionLogsContainer.style.display = 'none';
+            } else {
+                tabReport.className = "flex-1 py-2 text-center font-bold border-b-2 border-blue-600 text-blue-600";
+                tabPlan.className = "flex-1 py-2 text-center font-bold text-gray-500 hover:text-blue-500 border-b-2 border-transparent";
+                sectionSafety.style.display = 'none';
+                sectionLogsContainer.style.display = 'block';
+            }
+            updatePreview();
+            if (typeof saveDraft === "function") saveDraft();
+        }
+
+        function syncBasicInfoText() {
+            inputBasicInfo.value = basicFields
+                .filter(field => field.label.trim() !== '')
+                .map(field => `${field.label.trim()}：${field.value}`)
+                .join('\n');
+        }
+
+        function getPresetValues(label) {
+            const exact = String(label || '').trim();
+            return Array.isArray(basicPresets[exact]) ? basicPresets[exact] : [];
+        }
+
+        function renderBasicFields() {
+            basicFieldsContainer.innerHTML = '';
+
+            if (basicFields.length === 0) {
+                const empty = document.createElement('div');
+                empty.className = 'text-sm text-gray-400 border border-dashed rounded p-4 text-center';
+                empty.textContent = '基本情報の項目がありません。「＋ 項目を追加」から追加できます。';
+                basicFieldsContainer.appendChild(empty);
+            }
+
+            basicFields.forEach(field => {
+                const row = document.createElement('div');
+                row.className = 'grid grid-cols-12 gap-2 items-start bg-gray-50 border rounded-lg p-2';
+
+                const presets = getPresetValues(field.label);
+                const presetOptions = presets
+                    .map(value => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`)
+                    .join('');
+
+                row.innerHTML = `
+                    <div class="col-span-4 lg:col-span-3">
+                        <input type="text"
+                            value="${escapeHtml(field.label)}"
+                            oninput="updateBasicField(${field.id}, 'label', this.value)"
+                            onchange="renderBasicFields(); saveDraft();"
+                            placeholder="項目名"
+                            class="w-full p-2 border rounded bg-white text-sm font-medium focus:ring-1 focus:ring-blue-400 outline-none">
+                    </div>
+
+                    <div class="col-span-6 lg:col-span-7">
+                        <div class="flex gap-1">
+                            <input type="text"
+                                value="${escapeHtml(field.value)}"
+                                oninput="updateBasicField(${field.id}, 'value', this.value)"
+                                placeholder="内容を入力"
+                                class="min-w-0 flex-1 p-2 border rounded bg-white text-sm focus:ring-1 focus:ring-blue-400 outline-none">
+
+                            ${presets.length ? `
+                            <select onchange="applyPreset(${field.id}, this.value); this.selectedIndex=0"
+                                class="max-w-[130px] p-2 border rounded bg-white text-xs text-gray-700"
+                                title="よく使う内容から選択">
+                                <option value="">よく使う内容</option>
+                                ${presetOptions}
+                            </select>` : ''}
+                        </div>
+
+                        <div class="mt-1 flex items-center gap-2">
+                            <button onclick="saveCurrentAsPreset(${field.id})"
+                                class="text-[10px] text-amber-700 hover:text-amber-900 hover:underline"
+                                title="現在の入力内容をこの項目の候補として保存">
+                                ★ よく使う内容に登録
+                            </button>
+                            ${presets.length ? `
+                            <button onclick="managePresets('${escapeHtml(field.label).replaceAll("'", "&#039;")}')"
+                                class="text-[10px] text-gray-400 hover:text-gray-600 hover:underline">
+                                候補を編集
+                            </button>` : ''}
+                        </div>
+                    </div>
+
+                    <div class="col-span-1 flex justify-center pt-1">
+                        <label class="flex flex-col items-center text-[10px] text-gray-500 cursor-pointer select-none" title="未入力時に警告する">
+                            <input type="checkbox"
+                                ${field.required ? 'checked' : ''}
+                                onchange="updateBasicField(${field.id}, 'required', this.checked)"
+                                class="accent-blue-600">
+                            必須
+                        </label>
+                    </div>
+
+                    <div class="col-span-1 flex justify-end pt-1">
+                        <button onclick="removeBasicField(${field.id})"
+                            class="text-gray-300 hover:text-red-500 text-xl leading-none px-1"
+                            title="この項目を削除">×</button>
+                    </div>
+                `;
+                basicFieldsContainer.appendChild(row);
+            });
+
+            syncBasicInfoText();
+            validateBasicInfo();
+            updatePreview();
+        }
+
+        function updateBasicField(id, property, value) {
+            const field = basicFields.find(f => f.id === id);
+            if (!field) return;
+            field[property] = value;
+            syncBasicInfoText();
+            validateBasicInfo();
+            updatePreview();
+            saveDraft();
+        }
+
+        function normalizeFieldLabel(label) {
+            return String(label || '')
+                .replace(/^>\s*/, '')
+                .replace(/[　\s]+/g, '')
+                .trim();
+        }
+
+        function parsePastedBasicInfo(raw) {
+            const parsed = [];
+            const lines = String(raw || '').split(/\r?\n/);
+
+            lines.forEach(line => {
+                const clean = line.replace(/^>\s*/, '').trim();
+                if (!clean) return;
+
+                const m = clean.match(/^(.+?)[：:]\s*(.*)$/);
+                if (!m) return;
+
+                const label = m[1].replace(/[　\s]+$/g, '').trim();
+                const value = m[2].trim();
+                if (!label) return;
+
+                parsed.push({ label, value });
+            });
+
+            return parsed;
+        }
+
+        function importBasicInfoFromPaste(mode = 'merge') {
+            const parsed = parsePastedBasicInfo(basicPasteInput.value);
+
+            if (!parsed.length) {
+                pasteImportStatus.textContent = '読み取れる「項目名：内容」がありません';
+                pasteImportStatus.className = 'text-xs text-red-500 self-center';
+                return;
+            }
+
+            if (mode === 'replace') {
+                basicFields = parsed.map(item => ({
+                    id: basicFieldIdCounter++,
+                    label: item.label,
+                    value: item.value,
+                    required: inferRequiredFromLabel(item.label)
+                }));
+            } else {
+                parsed.forEach(item => {
+                    const normalized = normalizeFieldLabel(item.label);
+                    const existing = basicFields.find(field =>
+                        normalizeFieldLabel(field.label) === normalized
+                    );
+
+                    if (existing) {
+                        existing.value = item.value;
+                    } else {
+                        basicFields.push({
+                            id: basicFieldIdCounter++,
+                            label: item.label,
+                            value: item.value,
+                            required: inferRequiredFromLabel(item.label)
+                        });
+                    }
+                });
+            }
+
+            renderBasicFields();
+            syncBasicInfoText();
+            updatePreview();
+            saveDraft();
+
+            pasteImportStatus.textContent = `${parsed.length}項目を${mode === 'replace' ? '置換' : '反映'}しました`;
+            pasteImportStatus.className = 'text-xs text-green-600 self-center';
+        }
+
+        function applyPreset(id, value) {
+            if (!value) return;
+            const field = basicFields.find(f => f.id === id);
+            if (!field) return;
+            field.value = value;
+            renderBasicFields();
+            updatePreview();
+            saveDraft();
+        }
+
+        function saveCurrentAsPreset(id) {
+            const field = basicFields.find(f => f.id === id);
+            if (!field) return;
+
+            const label = String(field.label || '').trim();
+            const value = String(field.value || '').trim();
+
+            if (!label) {
+                alert('先に項目名を入力してください。');
+                return;
+            }
+            if (!value) {
+                alert('登録する内容を入力してください。');
+                return;
+            }
+
+            if (!Array.isArray(basicPresets[label])) basicPresets[label] = [];
+
+            if (!basicPresets[label].includes(value)) {
+                basicPresets[label].push(value);
+                saveDraft();
+            }
+
+            renderBasicFields();
+        }
+
+        function managePresets(label) {
+            const values = getPresetValues(label);
+            const current = values.join('\n');
+            const edited = prompt(
+                `「${label}」の候補を1行に1つずつ入力してください。\\n空欄にすると候補をすべて削除します。`,
+                current
+            );
+            if (edited === null) return;
+
+            basicPresets[label] = edited
+                .split(/\r?\n/)
+                .map(v => v.trim())
+                .filter(Boolean)
+                .filter((v, i, arr) => arr.indexOf(v) === i);
+
+            renderBasicFields();
+            saveDraft();
+        }
+
+        function addBasicField(label = '', value = '', required = false) {
+            basicFields.push({
+                id: basicFieldIdCounter++,
+                label,
+                value,
+                required
+            });
+            renderBasicFields();
+            updatePreview();
+            saveDraft();
+
+            requestAnimationFrame(() => {
+                const rows = basicFieldsContainer.querySelectorAll('input[placeholder="項目名"]');
+                const last = rows[rows.length - 1];
+                if (last) last.focus();
+            });
+        }
+
+        function removeBasicField(id) {
+            basicFields = basicFields.filter(f => f.id !== id);
+            renderBasicFields();
+            updatePreview();
+            saveDraft();
+        }
+
+        function resetBasicFields() {
+            if (!confirm('基本情報の項目構成を標準状態に戻しますか？入力済みの基本情報は消去されます。')) return;
+            basicFields = makeDefaultBasicFields();
+            renderBasicFields();
+            updatePreview();
+            saveDraft();
+        }
+
+        function inferRequiredFromLabel(label) {
+            const normalized = String(label || '').replace(/\s/g, '');
+            const template = defaultBasicFieldTemplates.find(t =>
+                normalized === t.label.replace(/\s/g, '')
+            );
+            return template ? template.required : false;
+        }
+
+        function parseBasicInfoTextToFields(raw) {
+            if (typeof raw !== 'string' || !raw.trim()) return makeDefaultBasicFields();
+
+            return raw.split('\n')
+                .map(line => line.replace(/^>\s*/, '').trim())
+                .filter(Boolean)
+                .map(line => {
+                    const m = line.match(/^([^：:]+)[：:]\s*(.*)$/);
+                    const label = m ? m[1].trim() : line;
+                    const value = m ? m[2].trim() : '';
+                    return {
+                        id: basicFieldIdCounter++,
+                        label,
+                        value,
+                        required: inferRequiredFromLabel(label)
+                    };
+                });
+        }
+
+        function getFieldValue(field) {
+            const lines = inputBasicInfo.value.split('\n');
+            for (const line of lines) {
+                const clean = line.replace(/^>\s*/, '').trim();
+                if (!field.regex.test(clean)) continue;
+                const m = clean.match(/^[^：:]+[：:]\s*(.*)$/);
+                if (m) return m[1].trim();
+            }
+            return "";
+        }
+
+        function validateBasicInfo() {
+            checkListContainer.innerHTML = '';
+            const required = basicFields.filter(field => field.required && field.label.trim() !== '');
+            let allClear = true;
+
+            if (required.length === 0) {
+                const el = document.createElement('span');
+                el.className = 'px-2 py-1 rounded bg-gray-100 text-gray-600';
+                el.textContent = '必須指定なし';
+                checkListContainer.appendChild(el);
+            }
+
+            required.forEach(field => {
+                const isFilled = String(field.value || '').trim().length > 0;
+                if (!isFilled) allClear = false;
+
+                const el = document.createElement('span');
+                el.className = `px-2 py-1 rounded flex items-center gap-1 ${isFilled ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`;
+                el.textContent = `${isFilled ? '✓' : '×'} ${field.label || '名称未設定'}${isFilled ? '' : ' 未入力'}`;
+                checkListContainer.appendChild(el);
+            });
+
+            validationStatus.textContent = allClear ? "必須項目入力済み" : "未入力項目あり";
+            validationStatus.className = `text-xs px-2 py-1 rounded ${allClear ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`;
+            return allClear;
+        }
+
+
+        function fieldRecordsToLogs(data, sourceType = "field-package") {
+            if (!Array.isArray(data.records)) throw new Error("記録形式が不正です");
+            return data.records.map(rec => {
+                const tasks = [];
+                if (Array.isArray(rec.actions)) tasks.push(...rec.actions);
+                if (rec.note) tasks.push(rec.note);
+
+                const photos = Array.isArray(rec.photos) ? rec.photos : [];
+                const photoTimes = photos.map(p => p && p.takenAt ? String(p.takenAt) : "").filter(Boolean);
+                const photoNames = photos.map(p => p && p.name ? String(p.name) : "").filter(Boolean);
+                if (photos.length && tasks.length === 0) tasks.push("写真記録");
+                if (photoTimes.length) tasks.push(`写真撮影時刻：${photoTimes.map(t => t.split(" ").pop()).join(" / ")}`);
+
+                return {
+                    id: logIdCounter++,
+                    sourceRecordId: Number.isFinite(Number(rec.id)) ? Number(rec.id) : null,
+                    sourceSyncId: rec.uid || null,
+                    time: rec.time || "",
+                    location: rec.location || "",
+                    lat: rec.lat ?? null,
+                    lng: rec.lng ?? null,
+                    gpsAccuracy: rec.gpsAccuracy ?? null,
+                    task: tasks.join("\n"),
+                    sourceFile: photoNames.length ? photoNames.join(", ") : (Array.isArray(rec.photoNames) ? rec.photoNames.join(", ") : ""),
+                    sourceType,
+                    photoCount: photos.length || Number(rec.photoCount) || 0,
+                    photoTimes,
+                    isLoadingAddress: false
+                };
+            });
+        }
+
+        async function importFieldPackage(file) {
+            try {
+                fieldPackageStatus.textContent = "読み込み中...";
+                fieldPackageStatus.className = "text-xs text-gray-500 mt-2";
+                let data;
+                fieldPackageZip = null;
+                fieldPackagePhotoIndex = new Map();
+
+                if (file.name.toLowerCase().endsWith(".zip")) {
+                    const zip = await JSZip.loadAsync(file);
+                    fieldPackageZip = zip;
+                    const jsonFile = zip.file("trip_records.json");
+                    if (!jsonFile) throw new Error("trip_records.json がありません");
+                    data = JSON.parse(await jsonFile.async("string"));
+
+                    // photos/<recordId>_<index>_<filename> を記録IDごとに索引化
+                    Object.values(zip.files)
+                        .filter(entry => !entry.dir && entry.name.startsWith("photos/"))
+                        .forEach(entry => {
+                            const base = entry.name.split("/").pop();
+                            const m = base.match(/^(\d+)_\d+_(.*)$/);
+                            if (!m) return;
+                            const recordId = Number(m[1]);
+                            const originalName = m[2] || base;
+                            if (!fieldPackagePhotoIndex.has(recordId)) fieldPackagePhotoIndex.set(recordId, []);
+                            fieldPackagePhotoIndex.get(recordId).push({
+                                path: entry.name,
+                                name: originalName
+                            });
+                        });
+                } else {
+                    data = JSON.parse(await file.text());
+                }
+
+                const imported = fieldRecordsToLogs(data, "field-package");
+
+                logs.push(...imported);
+                sortLogs();
+                renderLogs();
+
+                // ZIPを読んだ時点で一度、自動整理まで進める
+                buildEventsFromLogs(false);
+                saveDraft();
+
+                const photoTotal = imported.reduce((sum, r) => sum + (r.photoCount || 0), 0);
+                fieldPackageStatus.textContent =
+                    `${imported.length}件の現場記録を読み込みました` +
+                    (photoTotal ? `（写真 ${photoTotal}枚）` : "");
+                fieldPackageStatus.className = "text-xs text-green-600 mt-2";
+            } catch (e) {
+                console.error(e);
+                fieldPackageStatus.textContent = `読み込みに失敗しました：${e.message || e}`;
+                fieldPackageStatus.className = "text-xs text-red-600 mt-2";
+            }
+        }
+
+        if (fieldPackageInput) {
+            fieldPackageInput.addEventListener("change", async (e) => {
+                const file = e.target.files?.[0];
+                if (file) await importFieldPackage(file);
+                e.target.value = "";
+            });
+        }
+
+
+        // ---------- Dropbox同期（PCは読み取り専用） ----------
+        const DROPBOX_FILE = "/trip_records.json";
+        const DROPBOX_APP_KEY_KEY = "eri_dropbox_app_key";
+        const DROPBOX_PC_ACCESS_KEY = "eri_dropbox_pc_access_token";
+        const DROPBOX_PC_REFRESH_KEY = "eri_dropbox_pc_refresh_token";
+        const DROPBOX_PC_EXPIRES_KEY = "eri_dropbox_pc_expires_at";
+
+        function dropboxRedirectUri() {
+            let p = location.pathname;
+            if (p.endsWith("/index.html")) p = p.slice(0, -"index.html".length);
+            return location.origin + p;
+        }
+        function getDropboxAppKey() { return (localStorage.getItem(DROPBOX_APP_KEY_KEY) || "").trim(); }
+        function setDropboxStatus(msg, kind = "") {
+            if (!dropboxStatus) return;
+            dropboxStatus.textContent = msg;
+            dropboxStatus.className = `text-xs mt-2 ${
+                kind === "ok" ? "text-green-700" :
+                kind === "bad" ? "text-red-700" :
+                kind === "warn" ? "text-amber-700" : "text-gray-500"
+            }`;
+        }
+        function saveDropboxAppKey() {
+            const key = (dropboxAppKeyInput?.value || "").trim();
+            if (!key) { alert("App keyを入力してください。"); return; }
+            localStorage.setItem(DROPBOX_APP_KEY_KEY, key);
+            setDropboxStatus("App keyを保存しました。Dropboxに接続してください。", "ok");
+        }
+        function randomBase64Url(bytes = 48) {
+            const a = new Uint8Array(bytes); crypto.getRandomValues(a);
+            return btoa(String.fromCharCode(...a)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+        }
+        async function sha256Base64Url(text) {
+            const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+            return btoa(String.fromCharCode(...new Uint8Array(digest))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+        }
+        async function connectDropbox() {
+            const key = getDropboxAppKey();
+            if (!key) { alert("先にApp keyを保存してください。"); return; }
+            if (!window.isSecureContext || !crypto?.subtle) { alert("Dropbox認証にはHTTPSの安全な接続が必要です。"); return; }
+            const verifier = randomBase64Url(64), challenge = await sha256Base64Url(verifier), state = randomBase64Url(24);
+            sessionStorage.setItem("eri_dropbox_pc_pkce_verifier", verifier);
+            sessionStorage.setItem("eri_dropbox_pc_oauth_state", state);
+            const u = new URL("https://www.dropbox.com/oauth2/authorize");
+            u.searchParams.set("client_id", key);
+            u.searchParams.set("response_type", "code");
+            u.searchParams.set("redirect_uri", dropboxRedirectUri());
+            u.searchParams.set("code_challenge", challenge);
+            u.searchParams.set("code_challenge_method", "S256");
+            u.searchParams.set("token_access_type", "offline");
+            u.searchParams.set("state", state);
+            location.href = u.toString();
+        }
+        async function handleDropboxRedirect() {
+            const q = new URLSearchParams(location.search), code = q.get("code"), state = q.get("state"), err = q.get("error");
+            if (err) {
+                history.replaceState({}, document.title, dropboxRedirectUri());
+                setDropboxStatus(`Dropbox認証に失敗しました：${q.get("error_description") || err}`, "bad");
+                return false;
+            }
+            if (!code) return false;
+            const key = getDropboxAppKey(), verifier = sessionStorage.getItem("eri_dropbox_pc_pkce_verifier"), expected = sessionStorage.getItem("eri_dropbox_pc_oauth_state");
+            if (!key || !verifier || !expected || state !== expected) throw new Error("Dropbox認証状態を確認できません");
+            setDropboxStatus("Dropbox認証を完了しています…");
+            const body = new URLSearchParams({
+                code, grant_type: "authorization_code", redirect_uri: dropboxRedirectUri(), code_verifier: verifier, client_id: key
+            });
+            const r = await fetch("https://api.dropboxapi.com/oauth2/token", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body });
+            const data = await r.json();
+            if (!r.ok) throw new Error(data.error_description || data.error || `HTTP ${r.status}`);
+            localStorage.setItem(DROPBOX_PC_ACCESS_KEY, data.access_token);
+            localStorage.setItem(DROPBOX_PC_EXPIRES_KEY, String(Date.now() + Number(data.expires_in || 14400) * 1000));
+            if (data.refresh_token) localStorage.setItem(DROPBOX_PC_REFRESH_KEY, data.refresh_token);
+            sessionStorage.removeItem("eri_dropbox_pc_pkce_verifier"); sessionStorage.removeItem("eri_dropbox_pc_oauth_state");
+            history.replaceState({}, document.title, dropboxRedirectUri());
+            setDropboxStatus("Dropbox接続済み。最新記録を取得します。", "ok");
+            await pullDropboxRecords(false);
+            return true;
+        }
+        async function getDropboxAccessToken() {
+            const key = getDropboxAppKey();
+            if (!key) throw new Error("Dropbox App keyが未設定です");
+            const token = localStorage.getItem(DROPBOX_PC_ACCESS_KEY), expires = Number(localStorage.getItem(DROPBOX_PC_EXPIRES_KEY) || 0);
+            if (token && Date.now() < expires - 60000) return token;
+            const refresh = localStorage.getItem(DROPBOX_PC_REFRESH_KEY);
+            if (!refresh) throw new Error("Dropboxへの接続が必要です");
+            const body = new URLSearchParams({ grant_type: "refresh_token", refresh_token: refresh, client_id: key });
+            const r = await fetch("https://api.dropboxapi.com/oauth2/token", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body });
+            const data = await r.json();
+            if (!r.ok) throw new Error(data.error_description || data.error || `HTTP ${r.status}`);
+            localStorage.setItem(DROPBOX_PC_ACCESS_KEY, data.access_token);
+            localStorage.setItem(DROPBOX_PC_EXPIRES_KEY, String(Date.now() + Number(data.expires_in || 14400) * 1000));
+            return data.access_token;
+        }
+        async function downloadDropboxJson(token) {
+            const r = await fetch("https://content.dropboxapi.com/2/files/download", {
+                method: "POST",
+                headers: { "Authorization": `Bearer ${token}`, "Dropbox-API-Arg": JSON.stringify({ path: DROPBOX_FILE }) }
+            });
+            if (!r.ok) {
+                let detail = "";
+                try { detail = await r.text(); } catch(e) {}
+                if (r.status === 409 && /not_found|path/.test(detail)) throw new Error("まだDropboxに現場記録がありません。先にスマホ側で同期してください。");
+                throw new Error(`Dropbox取得エラー HTTP ${r.status}`);
+            }
+            return JSON.parse(await r.text());
+        }
+        async function pullDropboxRecords(showMessage = false) {
+            if (!navigator.onLine) { setDropboxStatus("オフラインです。", "warn"); return; }
+            if (!getDropboxAppKey()) { setDropboxStatus("App keyを入力してください。", "warn"); return; }
+            if (!localStorage.getItem(DROPBOX_PC_REFRESH_KEY) && !localStorage.getItem(DROPBOX_PC_ACCESS_KEY)) {
+                setDropboxStatus("Dropboxに接続してください。", "warn"); return;
+            }
+            setDropboxStatus("Dropboxから最新記録を取得中…");
+            try {
+                const token = await getDropboxAccessToken();
+                const data = await downloadDropboxJson(token);
+                const imported = fieldRecordsToLogs(data, "dropbox");
+
+                // Dropbox由来の前回分だけを差し替える。手入力・写真・メモ等は残す。
+                logs = logs.filter(l => l.sourceType !== "dropbox");
+                logs.push(...imported);
+                sortLogs();
+                renderLogs();
+                buildEventsFromLogs(false);
+                saveDraft();
+
+                const photoTotal = imported.reduce((sum, r) => sum + (r.photoCount || 0), 0);
+                const stamp = new Date().toLocaleString("ja-JP");
+                setDropboxStatus(`取得済み：${stamp} / ${imported.length}件` + (photoTotal ? ` / 写真記録 ${photoTotal}枚` : ""), "ok");
+                if (showMessage) fieldPackageStatus.textContent = "Dropboxの最新記録を反映しました。";
+            } catch (e) {
+                console.error(e);
+                setDropboxStatus(`取得失敗：${e.message || e}`, "bad");
+            }
+        }
+
+        function parseLogDate(timeText) {
+            if (!timeText) return null;
+            const m = String(timeText).trim().match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})\s+(\d{1,2}):(\d{2})/);
+            if (!m) return null;
+            const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]));
+            return Number.isNaN(d.getTime()) ? null : d;
+        }
+
+        function haversineMeters(lat1, lng1, lat2, lng2) {
+            const vals = [lat1, lng1, lat2, lng2].map(Number);
+            if (vals.some(v => !Number.isFinite(v))) return Infinity;
+            const [a1, o1, a2, o2] = vals;
+            const R = 6371000;
+            const toRad = x => x * Math.PI / 180;
+            const dLat = toRad(a2 - a1);
+            const dLng = toRad(o2 - o1);
+            const s = Math.sin(dLat/2) ** 2 +
+                Math.cos(toRad(a1)) * Math.cos(toRad(a2)) * Math.sin(dLng/2) ** 2;
+            return 2 * R * Math.asin(Math.min(1, Math.sqrt(s)));
+        }
+
+        function normalizedLocation(log) {
+            return String(log.location || "").trim().replace(/\s+/g, " ");
+        }
+
+        function hasBoundaryAction(log) {
+            const text = String(log.task || "");
+            return /移動開始|出発/.test(text);
+        }
+
+        function locationsCompatible(a, b, distanceLimit) {
+            const la = normalizedLocation(a);
+            const lb = normalizedLocation(b);
+            if (la && lb && la === lb) return true;
+
+            if (a.lat !== null && a.lat !== undefined && a.lng !== null && a.lng !== undefined &&
+                b.lat !== null && b.lat !== undefined && b.lng !== null && b.lng !== undefined) {
+                return haversineMeters(a.lat, a.lng, b.lat, b.lng) <= distanceLimit;
+            }
+
+            // 場所情報が双方ともない場合は、時刻だけでまとめられるようにする
+            return !la && !lb &&
+                (a.lat === null || a.lat === undefined) &&
+                (b.lat === null || b.lat === undefined);
+        }
+
+        function uniqueNonEmpty(items) {
+            return [...new Set(items.map(v => String(v || "").trim()).filter(Boolean))];
+        }
+
+        function splitTasks(log) {
+            return String(log.task || "")
+                .split(/\n+/)
+                .map(v => v.trim().replace(/^[・\-]\s*/, ""))
+                .filter(Boolean);
+        }
+
+        function eventLocationFromLogs(group) {
+            const named = group.map(normalizedLocation).filter(Boolean);
+            if (named.length) {
+                const counts = {};
+                named.forEach(v => counts[v] = (counts[v] || 0) + 1);
+                return Object.entries(counts).sort((a,b) => b[1] - a[1])[0][0];
+            }
+            const gps = group.find(l => Number.isFinite(Number(l.lat)) && Number.isFinite(Number(l.lng)));
+            return gps ? `${Number(gps.lat).toFixed(6)}, ${Number(gps.lng).toFixed(6)}` : "";
+        }
+
+        function eventCoordsFromLogs(group) {
+            const gpsLogs = group.filter(l => Number.isFinite(Number(l.lat)) && Number.isFinite(Number(l.lng)));
+            if (!gpsLogs.length) return { lat: null, lng: null };
+            return {
+                lat: gpsLogs.reduce((s,l) => s + Number(l.lat), 0) / gpsLogs.length,
+                lng: gpsLogs.reduce((s,l) => s + Number(l.lng), 0) / gpsLogs.length
+            };
+        }
+
+        function actionPhrase(action) {
+            const map = {
+                "データ回収": "データ回収を行った",
+                "地震計確認": "地震計の動作確認を行った",
+                "SD交換": "SDカードを交換した",
+                "バッテリー交換": "バッテリーを交換した",
+                "GPS確認": "GPS機器の確認を行った",
+                "アンテナ交換": "アンテナを交換した",
+                "電源確認": "電源状態を確認した",
+                "観測点到着": "",
+                "移動開始": "次の地点へ移動を開始した",
+                "作業終了": "作業を終了した",
+                "写真記録": "現場写真を記録した"
+            };
+            if (Object.prototype.hasOwnProperty.call(map, action)) return map[action];
+            return action;
+        }
+
+        function joinJapaneseClauses(clauses) {
+            const list = clauses.filter(Boolean);
+            if (!list.length) return "";
+            if (list.length === 1) return list[0];
+            return list.slice(0, -1).join("、") + "、" + list[list.length - 1];
+        }
+
+        function ensurePeriod(text) {
+            const t = String(text || "").trim();
+            if (!t) return "";
+            return /[。！？!?]$/.test(t) ? t : t + "。";
+        }
+
+        function generateEventProse(event) {
+            const tasks = uniqueNonEmpty(event.tasks || []);
+            const arrived = tasks.includes("観測点到着");
+            const moving = tasks.includes("移動開始");
+            const ended = tasks.includes("作業終了");
+
+            const knownActionNames = new Set([
+                "観測点到着","データ回収","地震計確認","SD交換","バッテリー交換",
+                "GPS確認","アンテナ交換","電源確認","移動開始","作業終了","写真記録"
+            ]);
+            const actionTasks = tasks.filter(t => knownActionNames.has(t));
+            const notes = tasks.filter(t => !knownActionNames.has(t) && !/^写真撮影時刻：/.test(t));
+
+            const mainActions = actionTasks
+                .filter(t => !["観測点到着","移動開始","作業終了"].includes(t))
+                .map(actionPhrase)
+                .filter(Boolean);
+
+            const place = event.location || "";
+            let first = "";
+
+            if (moving && !mainActions.length && !notes.length) {
+                first = place ? `${event.startTime}頃、${place}から次の地点へ移動を開始した。`
+                              : `${event.startTime}頃、次の地点へ移動を開始した。`;
+            } else if (place) {
+                if (arrived) {
+                    first = `${event.startTime}頃、${place}に到着`;
+                    if (mainActions.length) first += `し、${joinJapaneseClauses(mainActions)}`;
+                    first += "。";
+                } else if (mainActions.length) {
+                    first = `${event.startTime}頃、${place}にて${joinJapaneseClauses(mainActions)}。`;
+                } else {
+                    first = `${event.startTime}頃、${place}で記録を行った。`;
+                }
+            } else {
+                if (arrived) {
+                    first = `${event.startTime}頃、現地に到着`;
+                    if (mainActions.length) first += `し、${joinJapaneseClauses(mainActions)}`;
+                    first += "。";
+                } else if (mainActions.length) {
+                    first = `${event.startTime}頃、${joinJapaneseClauses(mainActions)}。`;
+                } else if (notes.length) {
+                    first = `${event.startTime}頃、作業記録を行った。`;
+                }
+            }
+
+            const noteSentences = notes.map(ensurePeriod).join("");
+            const endSentence = ended && !/作業を終了/.test(first) ? "一連の作業を終了した。" : "";
+            return `${first}${noteSentences}${endSentence}`.trim();
+        }
+
+        function buildEventsFromLogs(userInitiated = false) {
+            const sourceLogs = logs
+                .filter(l => l.time)
+                .map(l => ({...l, _date: parseLogDate(l.time)}))
+                .filter(l => l._date)
+                .sort((a,b) => a._date - b._date);
+
+            if (!sourceLogs.length) {
+                events = [];
+                renderEvents();
+                if (userInitiated) alert("日時のあるログがありません。");
+                return;
+            }
+
+            const minuteLimit = Math.max(1, Number(mergeMinutesInput?.value || 30));
+            const distanceLimit = Math.max(10, Number(mergeDistanceInput?.value || 500));
+            const groups = [];
+
+            for (const log of sourceLogs) {
+                const prevGroup = groups[groups.length - 1];
+                if (!prevGroup) {
+                    groups.push([log]);
+                    continue;
+                }
+
+                const prev = prevGroup[prevGroup.length - 1];
+                const gapMin = (log._date - prev._date) / 60000;
+                const sameDate = log._date.toDateString() === prev._date.toDateString();
+                const boundary = hasBoundaryAction(prev) || hasBoundaryAction(log);
+                const locationOk = locationsCompatible(prev, log, distanceLimit);
+
+                if (sameDate && gapMin >= 0 && gapMin <= minuteLimit && locationOk && !boundary) {
+                    prevGroup.push(log);
+                } else {
+                    groups.push([log]);
+                }
+            }
+
+            events = groups.map(group => {
+                const coords = eventCoordsFromLogs(group);
+                const start = group[0]._date;
+                const end = group[group.length - 1]._date;
+                const tasks = uniqueNonEmpty(group.flatMap(splitTasks));
+                const photoCount = group.reduce((sum,l) => sum + (Number(l.photoCount) || 0), 0);
+
+                const event = {
+                    id: eventIdCounter++,
+                    startTime: `${String(start.getHours()).padStart(2,'0')}:${String(start.getMinutes()).padStart(2,'0')}`,
+                    endTime: `${String(end.getHours()).padStart(2,'0')}:${String(end.getMinutes()).padStart(2,'0')}`,
+                    date: `${start.getFullYear()}/${String(start.getMonth()+1).padStart(2,'0')}/${String(start.getDate()).padStart(2,'0')}`,
+                    location: eventLocationFromLogs(group),
+                    lat: coords.lat,
+                    lng: coords.lng,
+                    tasks,
+                    photoCount,
+                    sourceLogIds: group.map(l => l.id),
+                    prose: ""
+                };
+                event.prose = generateEventProse(event);
+                return event;
+            });
+
+            renderEvents();
+            updatePreview();
+            saveDraft();
+        }
+
+        function updateEvent(id, field, value) {
+            const ev = events.find(e => e.id === id);
+            if (!ev) return;
+            ev[field] = value;
+            updatePreview();
+            saveDraft();
+        }
+
+        function regenerateEventProse(id) {
+            const ev = events.find(e => e.id === id);
+            if (!ev) return;
+            ev.prose = generateEventProse(ev);
+            renderEvents();
+            updatePreview();
+            saveDraft();
+        }
+
+        function removeEvent(id) {
+            events = events.filter(e => e.id !== id);
+            renderEvents();
+            updatePreview();
+            saveDraft();
+        }
+
+        function renderEvents() {
+            if (!eventsContainer || !eventsSummary) return;
+            eventsContainer.innerHTML = "";
+
+            if (!events.length) {
+                eventsSummary.textContent = "まだ整理していません。現場記録を読み込むか、「自動整理・文章生成」を押してください。";
+                return;
+            }
+
+            const totalPhotos = events.reduce((s,e) => s + (Number(e.photoCount) || 0), 0);
+            eventsSummary.textContent = `${events.length}件の作業イベントに整理しました` +
+                (totalPhotos ? `（写真 ${totalPhotos}枚）` : "");
+
+            events.forEach((ev, idx) => {
+                const el = document.createElement("div");
+                el.className = "rounded-lg border bg-white p-3 shadow-sm";
+                const range = ev.startTime === ev.endTime ? ev.startTime : `${ev.startTime}～${ev.endTime}`;
+                const tasks = (ev.tasks || []).join(" / ");
+
+                el.innerHTML = `
+                    <div class="flex items-start justify-between gap-2">
+                        <div class="flex-1 min-w-0">
+                            <div class="font-bold text-sm text-indigo-800">イベント ${idx + 1}　${escapeHtml(ev.date)} ${escapeHtml(range)}</div>
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-2 mt-2">
+                                <div>
+                                    <label class="text-[11px] text-gray-500">場所</label>
+                                    <input value="${escapeHtml(ev.location || "")}"
+                                        onchange="updateEvent(${ev.id}, 'location', this.value)"
+                                        class="w-full border rounded p-2 text-sm" placeholder="場所">
+                                </div>
+                                <div>
+                                    <label class="text-[11px] text-gray-500">含まれる記録</label>
+                                    <div class="text-xs text-gray-600 border rounded bg-gray-50 p-2 min-h-[38px]">${escapeHtml(tasks || "（作業内容なし）")}</div>
+                                </div>
+                            </div>
+                            <div class="mt-2">
+                                <div class="flex items-center justify-between gap-2">
+                                    <label class="text-[11px] text-gray-500">報告文（自由に修正可）</label>
+                                    <button onclick="regenerateEventProse(${ev.id})" class="text-[11px] text-indigo-700 hover:underline">文を再生成</button>
+                                </div>
+                                <textarea oninput="updateEvent(${ev.id}, 'prose', this.value)"
+                                    class="w-full border rounded p-2 text-sm min-h-[80px] bg-indigo-50/40">${escapeHtml(ev.prose || "")}</textarea>
+                            </div>
+                            ${ev.photoCount ? `<button onclick="showPackagePhotosForEvent(${ev.id})"
+                                class="mt-2 text-xs bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 px-2 py-1 rounded">
+                                📷 写真を確認（${ev.photoCount}枚）
+                            </button>` : ""}
+                        </div>
+                        <button onclick="removeEvent(${ev.id})" class="text-gray-300 hover:text-red-500 text-lg" title="このイベントを出力から除外">×</button>
+                    </div>`;
+                eventsContainer.appendChild(el);
+            });
+        }
+
+        async function showPackagePhotosForEvent(eventId) {
+            const ev = events.find(e => e.id === eventId);
+            if (!ev) return;
+
+            packagePhotoContent.innerHTML = "";
+            packagePhotoTitle.textContent = `${ev.date} ${ev.startTime}${ev.location ? " / " + ev.location : ""}`;
+
+            if (!fieldPackageZip) {
+                packagePhotoContent.innerHTML = '<div class="text-gray-500">JSONのみの読み込み、またはページ再読み込み後のため写真本体を参照できません。ZIPを再度読み込んでください。</div>';
+                packagePhotoModal.classList.remove("hidden");
+                packagePhotoModal.classList.add("flex");
+                return;
+            }
+
+            const relatedLogs = logs.filter(l => ev.sourceLogIds.includes(l.id));
+            const photoEntries = [];
+            relatedLogs.forEach(log => {
+                const recId = log.sourceRecordId;
+                if (recId === null || recId === undefined) return;
+                const items = fieldPackagePhotoIndex.get(Number(recId)) || [];
+                items.forEach(item => photoEntries.push(item));
+            });
+
+            if (!photoEntries.length) {
+                packagePhotoContent.innerHTML = '<div class="text-gray-500">このイベントの写真がZIP内に見つかりません。</div>';
+            } else {
+                for (const item of photoEntries) {
+                    const entry = fieldPackageZip.file(item.path);
+                    if (!entry) continue;
+                    const blob = await entry.async("blob");
+                    const url = URL.createObjectURL(blob);
+                    const wrap = document.createElement("div");
+                    wrap.className = "border rounded-lg overflow-hidden bg-gray-50";
+                    wrap.dataset.objectUrl = url;
+                    wrap.innerHTML = `
+                        <img src="${url}" class="w-full h-64 object-contain bg-black" alt="${escapeHtml(item.name)}">
+                        <div class="p-2 text-xs break-all">${escapeHtml(item.name)}</div>`;
+                    packagePhotoContent.appendChild(wrap);
+                }
+            }
+
+            packagePhotoModal.classList.remove("hidden");
+            packagePhotoModal.classList.add("flex");
+        }
+
+        function closePackagePhotos() {
+            packagePhotoContent.querySelectorAll("[data-object-url]").forEach(el => {
+                URL.revokeObjectURL(el.dataset.objectUrl);
+            });
+            packagePhotoContent.innerHTML = "";
+            packagePhotoModal.classList.add("hidden");
+            packagePhotoModal.classList.remove("flex");
+        }
+
+        // ドラッグ＆ドロップの処理
+        if (dropZone) dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('bg-blue-100', 'border-blue-500');
+        });
+        if (dropZone) dropZone.addEventListener('dragleave', () => {
+            dropZone.classList.remove('bg-blue-100', 'border-blue-500');
+        });
+        if (dropZone) dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('bg-blue-100', 'border-blue-500');
+            handleFiles(e.dataTransfer.files);
+        });
+        if (fileInput) fileInput.addEventListener('change', (e) => {
+            handleFiles(e.target.files);
+            fileInput.value = ''; // リセット
+        });
+
+        if (timelineInput) timelineInput.addEventListener('change', async (e) => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+            try {
+                timelineStatus.textContent = "解析中...";
+                const raw = await file.text();
+                const data = JSON.parse(raw);
+                parseTimelineData(data);
+                timelineStatus.textContent = `読込済み：位置 ${timelinePoints.length}件 / 滞在 ${timelineVisits.length}件`;
+                await inferLocationsFromTimeline();
+                saveDraft();
+            } catch (err) {
+                console.error(err);
+                timelineStatus.textContent = "読込失敗：JSON形式を確認してください";
+            }
+        });
+
+        function extractFirstTripDate() {
+            const raw = inputBasicInfo.value;
+            let m = raw.match(/(?:20\d{2})[\/\-年](\d{1,2})[\/\-月](\d{1,2})/);
+            if (m) {
+                const yearMatch = m[0].match(/20\d{2}/);
+                return `${yearMatch[0]}/${String(m[1]).padStart(2,'0')}/${String(m[2]).padStart(2,'0')}`;
+            }
+            m = raw.match(/(\d{1,2})[\/月](\d{1,2})/);
+            if (m) {
+                return `${new Date().getFullYear()}/${String(m[1]).padStart(2,'0')}/${String(m[2]).padStart(2,'0')}`;
+            }
+            const d = new Date();
+            return `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`;
+        }
+
+        function importMemo() {
+            const lines = memoInput.value.split('\n').map(v => v.trim()).filter(Boolean);
+            if (!lines.length) return;
+
+            let currentDate = extractFirstTripDate();
+            let lastLog = null;
+
+            lines.forEach(line => {
+                let task = line;
+                let time = "";
+                let m;
+
+                m = line.match(/^(?:(20\d{2})[\/\-年])?(\d{1,2})[\/\-月](\d{1,2})日?\s+(\d{1,2}):(\d{2})\s*(.*)$/);
+                if (m) {
+                    const y = m[1] || new Date().getFullYear();
+                    currentDate = `${y}/${String(m[2]).padStart(2,'0')}/${String(m[3]).padStart(2,'0')}`;
+                    time = `${currentDate} ${String(m[4]).padStart(2,'0')}:${m[5]}`;
+                    task = m[6] || "";
+                } else {
+                    m = line.match(/^(\d{1,2}):(\d{2})\s*(.*)$/);
+                    if (m) {
+                        time = `${currentDate} ${String(m[1]).padStart(2,'0')}:${m[2]}`;
+                        task = m[3] || "";
+                    }
+                }
+
+                if (time) {
+                    lastLog = {
+                        id: logIdCounter++,
+                        time,
+                        location: "",
+                        lat: null,
+                        lng: null,
+                        task,
+                        sourceFile: "",
+                        sourceType: "memo",
+                        isLoadingAddress: false
+                    };
+                    logs.push(lastLog);
+                } else if (lastLog) {
+                    lastLog.task += `${lastLog.task ? '\n' : ''}${task}`;
+                } else {
+                    lastLog = {
+                        id: logIdCounter++,
+                        time: `${currentDate} 00:00`,
+                        location: "",
+                        lat: null,
+                        lng: null,
+                        task,
+                        sourceFile: "",
+                        sourceType: "memo",
+                        isLoadingAddress: false
+                    };
+                    logs.push(lastLog);
+                }
+            });
+
+            sortLogs();
+            renderLogs();
+            inferLocationsFromTimeline();
+            saveDraft();
+        }
+
+        function parseCoordString(value) {
+            if (!value || typeof value !== "string") return null;
+            const nums = value.match(/-?\d+(?:\.\d+)?/g);
+            if (!nums || nums.length < 2) return null;
+            const lat = Number(nums[0]);
+            const lng = Number(nums[1]);
+            if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+            return { lat, lng };
+        }
+
+        function toMs(value) {
+            if (value === null || value === undefined) return null;
+            if (typeof value === "number") {
+                return value < 1e12 ? value * 1000 : value;
+            }
+            const n = Number(value);
+            if (Number.isFinite(n) && String(value).match(/^\d+$/)) {
+                return n < 1e12 ? n * 1000 : n;
+            }
+            const d = Date.parse(value);
+            return Number.isNaN(d) ? null : d;
+        }
+
+        function addTimelinePoint(time, coord, source="timeline") {
+            const ms = toMs(time);
+            if (!ms || !coord) return;
+            timelinePoints.push({ time: ms, lat: coord.lat, lng: coord.lng, source });
+        }
+
+        function parseTimelineData(data) {
+            timelinePoints = [];
+            timelineVisits = [];
+
+            const segments = Array.isArray(data?.semanticSegments) ? data.semanticSegments : [];
+
+            segments.forEach(seg => {
+                const start = toMs(seg.startTime || seg.startTimestamp);
+                const end = toMs(seg.endTime || seg.endTimestamp);
+
+                if (Array.isArray(seg.timelinePath)) {
+                    seg.timelinePath.forEach(p => {
+                        const coord = parseCoordString(p.point || p.latLng);
+                        addTimelinePoint(p.time || p.timestamp || seg.startTime, coord, "timelinePath");
+                    });
+                }
+
+                const visit = seg.visit || seg.placeVisit || null;
+                if (visit) {
+                    const candidate = visit.topCandidate || visit.location || visit;
+                    const coord =
+                        parseCoordString(candidate?.placeLocation?.latLng) ||
+                        parseCoordString(candidate?.latLng) ||
+                        (candidate?.latitudeE7 !== undefined && candidate?.longitudeE7 !== undefined
+                            ? { lat: Number(candidate.latitudeE7)/1e7, lng: Number(candidate.longitudeE7)/1e7 }
+                            : null);
+
+                    const name =
+                        candidate?.place?.name ||
+                        candidate?.placeName ||
+                        candidate?.semanticType ||
+                        visit?.semanticType ||
+                        "";
+
+                    if (coord && start) {
+                        timelineVisits.push({ start, end: end || start, lat: coord.lat, lng: coord.lng, name });
+                        addTimelinePoint(start, coord, "visit");
+                        if (end) addTimelinePoint(end, coord, "visit");
+                    }
+                }
+
+                const activity = seg.activity || seg.activitySegment || null;
+                if (activity) {
+                    const sc = parseCoordString(activity?.start?.latLng || activity?.startLocation?.latLng);
+                    const ec = parseCoordString(activity?.end?.latLng || activity?.endLocation?.latLng);
+                    addTimelinePoint(seg.startTime, sc, "activityStart");
+                    addTimelinePoint(seg.endTime, ec, "activityEnd");
+                }
+            });
+
+            // Older exports: timelineObjects/placeVisit/activitySegment
+            const oldObjects = Array.isArray(data?.timelineObjects) ? data.timelineObjects : [];
+            oldObjects.forEach(obj => {
+                if (obj.placeVisit) {
+                    const v = obj.placeVisit;
+                    const loc = v.location || {};
+                    const coord = (loc.latitudeE7 !== undefined && loc.longitudeE7 !== undefined)
+                        ? { lat: Number(loc.latitudeE7)/1e7, lng: Number(loc.longitudeE7)/1e7 }
+                        : null;
+                    const start = toMs(v.duration?.startTimestamp || v.duration?.startTimestampMs);
+                    const end = toMs(v.duration?.endTimestamp || v.duration?.endTimestampMs);
+                    if (coord && start) {
+                        timelineVisits.push({ start, end: end || start, lat: coord.lat, lng: coord.lng, name: loc.name || "" });
+                        addTimelinePoint(start, coord, "oldVisit");
+                    }
+                }
+            });
+
+            // Very old raw locations
+            const rawLocations = Array.isArray(data?.locations) ? data.locations : (Array.isArray(data) ? data : []);
+            rawLocations.forEach(p => {
+                if (p.latitudeE7 !== undefined && p.longitudeE7 !== undefined) {
+                    addTimelinePoint(
+                        p.timestamp || p.timestampMs,
+                        { lat: Number(p.latitudeE7)/1e7, lng: Number(p.longitudeE7)/1e7 },
+                        "raw"
+                    );
+                }
+            });
+
+            timelinePoints.sort((a,b) => a.time - b.time);
+            timelineVisits.sort((a,b) => a.start - b.start);
+        }
+
+        function parseLogTimeMs(timeText) {
+            const m = String(timeText || "").match(/^(\d{4})\/(\d{2})\/(\d{2})\s+(\d{2}):(\d{2})$/);
+            if (!m) return null;
+            return new Date(Number(m[1]), Number(m[2])-1, Number(m[3]), Number(m[4]), Number(m[5])).getTime();
+        }
+
+        function findTimelineMatch(ms) {
+            if (!ms) return null;
+
+            const visit = timelineVisits.find(v => ms >= v.start - 10*60*1000 && ms <= v.end + 10*60*1000);
+            if (visit) return { ...visit, diff: 0, kind: "visit" };
+
+            let best = null;
+            for (const p of timelinePoints) {
+                const diff = Math.abs(p.time - ms);
+                if (diff > 45*60*1000) continue;
+                if (!best || diff < best.diff) best = { ...p, diff, kind: "point" };
+            }
+            return best;
+        }
+
+        async function inferLocationsFromTimeline() {
+            if (!timelinePoints.length && !timelineVisits.length) return;
+
+            const targets = logs.filter(l => !l.location || l.location.startsWith("位置情報なし"));
+            for (const log of targets) {
+                const ms = parseLogTimeMs(log.time);
+                const match = findTimelineMatch(ms);
+                if (!match) continue;
+
+                log.lat = match.lat;
+                log.lng = match.lng;
+
+                if (match.name) {
+                    log.location = match.name + "（タイムライン推定）";
+                } else {
+                    log.location = "タイムラインから位置推定中...";
+                    const address = await reverseGeocode(match.lat, match.lng);
+                    log.location = `${address}（タイムライン推定）`;
+                    await new Promise(r => setTimeout(r, 1100));
+                }
+            }
+            renderLogs();
+            saveDraft();
+        }
+
+        function handleFiles(files) {
+            Array.from(files).forEach(file => {
+                if (!file.type.match('image.*')) return;
+
+                EXIF.getData(file, async function() {
+                    let logEntry = {
+                        id: logIdCounter++,
+                        time: "",
+                        location: "",
+                        lat: null,
+                        lng: null,
+                        task: "",
+                        sourceFile: file.name || "",
+                        sourceType: "photo",
+                        isLoadingAddress: false
+                    };
+
+                    // 日時の取得 (フォーマット: "YYYY:MM:DD HH:MM:SS")
+                    const dateTime = EXIF.getTag(this, "DateTimeOriginal");
+                    if (dateTime) {
+                        try {
+                            const [datePart, timePart] = dateTime.split(" ");
+                            const [yyyy, mm, dd] = datePart.split(":");
+                            const [hh, min] = timePart.split(":");
+                            logEntry.time = `${yyyy}/${mm}/${dd} ${hh}:${min}`;
+                        } catch(e) { console.error("日付パースエラー", e); }
+                    } else {
+                        // Exifに日付がない場合はファイルの最終更新日を使用
+                        const d = new Date(file.lastModified);
+                        logEntry.time = `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+                    }
+
+                    // GPS情報の取得
+                    const latArray = EXIF.getTag(this, "GPSLatitude");
+                    const latRef = EXIF.getTag(this, "GPSLatitudeRef");
+                    const lngArray = EXIF.getTag(this, "GPSLongitude");
+                    const lngRef = EXIF.getTag(this, "GPSLongitudeRef");
+
+                    if (latArray && lngArray) {
+                        logEntry.lat = convertDMSToDD(latArray, latRef);
+                        logEntry.lng = convertDMSToDD(lngArray, lngRef);
+                        logEntry.isLoadingAddress = true;
+                        
+                        // 一旦レンダリングしてローディング表示
+                        logs.push(logEntry);
+                        sortLogs();
+                        renderLogs();
+                        
+                        // 非同期で住所を取得
+                        const address = await reverseGeocode(logEntry.lat, logEntry.lng);
+                        
+                        // ログを更新して再レンダリング
+                        const index = logs.findIndex(l => l.id === logEntry.id);
+                        if(index !== -1) {
+                            logs[index].location = address;
+                            logs[index].isLoadingAddress = false;
+                            renderLogs();
+                            saveDraft();
+                        }
+                    } else {
+                        logEntry.location = "位置情報なし (屋内・地下など)";
+                        logs.push(logEntry);
+                        sortLogs();
+                        renderLogs();
+                        if (timelinePoints.length || timelineVisits.length) inferLocationsFromTimeline();
+                        saveDraft();
+                    }
+                });
+            });
+        }
+
+        function convertDMSToDD(dmsArray, ref) {
+            try {
+                let degrees = dmsArray[0].numerator / dmsArray[0].denominator;
+                let minutes = dmsArray[1].numerator / dmsArray[1].denominator;
+                let seconds = dmsArray[2].numerator / dmsArray[2].denominator;
+                let dd = degrees + (minutes / 60) + (seconds / 3600);
+                if (ref === "S" || ref === "W") { dd = dd * -1; }
+                return dd;
+            } catch (e) {
+                return null;
+            }
+        }
+
+        async function reverseGeocode(lat, lng) {
+            try {
+                // OpenStreetMap Nominatim APIを使用 (無料・登録不要)
+                // 山間部の観測点なども考慮し、詳細すぎる番地より町域などを優先して整形
+                const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=14`, {
+                    headers: { 'Accept-Language': 'ja' }
+                });
+                const data = await res.json();
+                
+                if (data && data.address) {
+                    const addr = data.address;
+                    // なるべく簡潔な地名を作成 (県 + 市区町村 + 町域など)
+                    let locName = "";
+                    if(addr.province || addr.state) locName += (addr.province || addr.state);
+                    if(addr.city || addr.town || addr.village) locName += (addr.city || addr.town || addr.village);
+                    if(addr.suburb || addr.quarter) locName += (addr.suburb || addr.quarter);
+                    
+                    return locName || data.display_name.split(',')[0]; 
+                }
+                return "取得失敗";
+            } catch (e) {
+                console.error("Geocoding Error:", e);
+                return "住所取得エラー";
+            }
+        }
+
+        function sortLogs() {
+            // 日時文字列でソート
+            logs.sort((a, b) => a.time.localeCompare(b.time));
+        }
+
+        function addManualLog() {
+            const now = new Date();
+            const timeStr = `${now.getFullYear()}/${String(now.getMonth()+1).padStart(2,'0')}/${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+            logs.push({
+                id: logIdCounter++,
+                time: timeStr,
+                location: "",
+                lat: null,
+                lng: null,
+                task: "",
+                sourceFile: "",
+                sourceType: "manual",
+                isLoadingAddress: false
+            });
+            sortLogs();
+            renderLogs();
+            saveDraft();
+        }
+
+        function removeLog(id) {
+            logs = logs.filter(l => l.id !== id);
+            renderLogs();
+            saveDraft();
+        }
+
+        function updateLog(id, field, value) {
+            const log = logs.find(l => l.id === id);
+            if (log) {
+                log[field] = value;
+                if(field === 'time') sortLogs(); // 時間が手修正されたら再ソート
+                updatePreview();
+                saveDraft();
+            }
+        }
+
+        function escapeHtml(value) {
+            return String(value ?? "")
+                .replaceAll("&", "&amp;")
+                .replaceAll("<", "&lt;")
+                .replaceAll(">", "&gt;")
+                .replaceAll('"', "&quot;")
+                .replaceAll("'", "&#039;");
+        }
+
+        function renderLogs() {
+            if (logs.length === 0) {
+                emptyState.style.display = 'block';
+                logsContainer.innerHTML = '';
+                logsContainer.appendChild(emptyState);
+                updatePreview();
+                return;
+            }
+
+            emptyState.style.display = 'none';
+            logsContainer.innerHTML = '';
+
+            logs.forEach(log => {
+                const el = document.createElement('div');
+                el.className = 'bg-white border rounded-lg p-3 shadow-sm relative group hover:border-blue-300 transition-colors';
+                
+                // 地図リンクの生成 (GPSがある場合)
+                let mapLinkHTML = '';
+                if (log.lat !== null && log.lng !== null) {
+                    const mapUrl = `https://maps.google.com/?q=${log.lat},${log.lng}`;
+                    mapLinkHTML = `<a href="${mapUrl}" target="_blank" class="text-blue-500 hover:underline flex items-center gap-1 mt-1 text-xs" title="Googleマップで開く">
+                        <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
+                        マップ
+                    </a>`;
+                }
+
+                // 住所部分のHTML (ローディング中か否か)
+                let locationInputHTML = '';
+                if (log.isLoadingAddress) {
+                    locationInputHTML = `<div class="flex items-center gap-2 text-sm text-gray-500 py-1"><div class="spinner"></div>住所を取得中...</div>`;
+                } else {
+                    locationInputHTML = `<input type="text" value="${escapeHtml(log.location)}" onchange="updateLog(${log.id}, 'location', this.value)" placeholder="場所を入力" class="w-full text-sm border-b focus:border-blue-500 outline-none pb-1 bg-transparent">`;
+                }
+
+                el.innerHTML = `
+                    <button onclick="removeLog(${log.id})" class="absolute top-2 right-2 text-gray-300 hover:text-red-500 transition-colors" title="削除">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                    </button>
+                    
+                    <div class="flex flex-col md:flex-row gap-3">
+                        <div class="w-full md:w-1/3 space-y-2">
+                            <div>
+                                <label class="text-xs text-gray-500">日時</label>
+                                <input type="text" value="${escapeHtml(log.time)}" onchange="updateLog(${log.id}, 'time', this.value)" onblur="renderLogs()" placeholder="YYYY/MM/DD HH:MM" class="w-full text-sm font-semibold border-b focus:border-blue-500 outline-none pb-1 bg-transparent">
+                            </div>
+                            <div>
+                                <label class="text-xs text-gray-500">場所</label>
+                                ${locationInputHTML}
+                                ${mapLinkHTML}
+                            </div>
+                        </div>
+                        <div class="w-full md:w-2/3">
+                            <label class="text-xs text-gray-500">作業内容</label>
+                            <textarea oninput="updateLog(${log.id}, 'task', this.value)" placeholder="（例：◯◯観測点にてバッテリー交換、データ回収）" class="w-full h-full min-h-[60px] p-2 text-sm border rounded bg-gray-50 focus:bg-white focus:ring-1 focus:ring-blue-400 outline-none resize-y">${escapeHtml(log.task)}</textarea>
+                            ${log.sourceFile ? `<div class="text-[10px] text-gray-400 mt-1">元画像: ${escapeHtml(log.sourceFile)}</div>` : ""}
+                            ${log.sourceType ? `<div class="text-[10px] text-gray-400 mt-1">情報源: ${escapeHtml(log.sourceType)}</div>` : ""}
+                        </div>
+                    </div>
+                `;
+                logsContainer.appendChild(el);
+            });
+            
+            updatePreview();
+        }
+
+        function updatePreview() {
+            // 可変フォームの現在値を必ずプレビュー用テキストへ同期する
+            syncBasicInfoText();
+            let reportText = `${inputIntro.value}\n\n`;
+
+            const purposeMatch = inputBasicInfo.value.match(/(?:^|\n)\s*>?\s*用務\s*[：:]\s*(.+)/);
+            const placeMatch = inputBasicInfo.value.match(/(?:^|\n)\s*>?\s*用務先\s*[：:]\s*(.+)/);
+            const label = purposeMatch?.[1]?.trim() || placeMatch?.[1]?.trim() || "";
+            const autoSubject = `${currentMode === 'plan' ? '【出張予定】' : '【出張報告】'}${label}`;
+            if (!subjectText.dataset.userEdited || subjectText.value.trim() === "") {
+                subjectText.value = autoSubject;
+            }
+
+            if (currentMode === 'plan') {
+                reportText += `以下の予定で出張いたします。\n\n`;
+                reportText += `${inputBasicInfo.value}\n\n`;
+                
+                if (inputSafety.value.trim() !== "") {
+                    reportText += `作業に関する安全留意事項：\n${inputSafety.value}\n\n`;
+                }
+                reportText += `どうぞよろしくお願いいたします。`;
+            } else {
+                reportText += `以下の出張報告をお送りします。\n\n`;
+                
+                // 基本情報の各行の頭に > を付与
+                const basicInfoLines = inputBasicInfo.value.split('\n');
+                basicInfoLines.forEach(line => {
+                    if (line.trim() !== "") {
+                        // 既に > が付いている場合は二重にならないようにする
+                        if (line.trim().startsWith('>')) {
+                            reportText += `${line}\n`;
+                        } else {
+                            reportText += `> ${line}\n`;
+                        }
+                    }
+                });
+                reportText += `\n`;
+                
+                const reportStyle = reportStyleSelect?.value || "prose";
+
+                if (reportStyle === "prose" && events.length > 0) {
+                    // 整理済みイベントを日付ごとに文章として出力
+                    const groupedEvents = {};
+                    events.forEach(ev => {
+                        if (!groupedEvents[ev.date]) groupedEvents[ev.date] = [];
+                        groupedEvents[ev.date].push(ev);
+                    });
+
+                    for (const [dateText, dayEvents] of Object.entries(groupedEvents)) {
+                        const p = dateText.split("/");
+                        const d = new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]));
+                        const dow = ["日","月","火","水","木","金","土"][d.getDay()];
+                        reportText += `${Number(p[1])}月${Number(p[2])}日(${dow})\n`;
+
+                        dayEvents.forEach(ev => {
+                            const prose = String(ev.prose || "").trim();
+                            if (prose) {
+                                reportText += `${prose}\n`;
+                            } else {
+                                const range = ev.startTime === ev.endTime ? ev.startTime : `${ev.startTime}～${ev.endTime}`;
+                                reportText += `${range}　${ev.location || "（場所未入力）"}\n`;
+                                (ev.tasks || []).forEach(t => reportText += `　・${t}\n`);
+                            }
+                        });
+                        reportText += "\n";
+                    }
+                } else if (logs.length === 0) {
+                    reportText += "（記録がありません）\n";
+                } else {
+                    // 元ログを日付ごとにグループ化して時系列表示
+                    let groupedLogs = {};
+                    logs.forEach(log => {
+                        if(!log.time) return;
+                        try {
+                            const [datePart, timePart] = log.time.split(' ');
+                            const [yyyy, mm, dd] = datePart.split('/');
+                            const d = new Date(yyyy, parseInt(mm) - 1, dd);
+                            const dayOfWeek = ["日", "月", "火", "水", "木", "金", "土"][d.getDay()];
+                            const dateKey = `${parseInt(mm)}月${parseInt(dd)}日(${dayOfWeek})`;
+
+                            if (!groupedLogs[dateKey]) groupedLogs[dateKey] = [];
+                            groupedLogs[dateKey].push({ time: timePart, location: log.location, task: log.task });
+                        } catch(e) {
+                            if (!groupedLogs["日付不明"]) groupedLogs["日付不明"] = [];
+                            groupedLogs["日付不明"].push(log);
+                        }
+                    });
+
+                    for (const [date, dayLogs] of Object.entries(groupedLogs)) {
+                        reportText += `${date}\n`;
+                        dayLogs.forEach(l => {
+                            const loc = l.location ? l.location : "（場所未入力）";
+                            reportText += `${l.time}　${loc}\n`;
+                            if (l.task) {
+                                const tasks = l.task.split('\n').filter(t => t.trim() !== '');
+                                tasks.forEach(t => {
+                                    if (t.trim().startsWith('・') || t.trim().startsWith('-')) {
+                                        reportText += `　${t.trim()}\n`;
+                                    } else {
+                                        reportText += `　・${t.trim()}\n`;
+                                    }
+                                });
+                            }
+                        });
+                    }
+                }
+
+                reportText += "\n以上、よろしくお願いいたします。";
+            }
+            
+            previewText.value = reportText;
+        }
+
+        async function copyToClipboard() {
+            try {
+                await navigator.clipboard.writeText(previewText.value);
+            } catch (e) {
+                previewText.removeAttribute('readonly');
+                previewText.select();
+                document.execCommand('copy');
+                previewText.setAttribute('readonly', '');
+            }
+
+            const status = document.getElementById('copy-status');
+            status.classList.remove('hidden');
+            setTimeout(() => status.classList.add('hidden'), 2000);
+        }
+
+        function openGmail() {
+            const body = encodeURIComponent(previewText.value);
+            const subject = encodeURIComponent(subjectText.value || (currentMode === 'plan' ? "【出張予定】" : "【出張報告】"));
+            const url = `https://mail.google.com/mail/?view=cm&fs=1&su=${subject}&body=${body}`;
+            window.open(url, '_blank');
+        }
+
+        const STORAGE_KEY = "eri_trip_report_pc_v05";
+        const LEGACY_STORAGE_KEYS = [
+            "eri_trip_report_pc_v04",
+            "eri_trip_report_pc_v02",
+            "eri_trip_report_generator_v051",
+            "eri_trip_report_generator_v04",
+            "eri_trip_report_generator_v02"
+        ];
+
+        function saveDraft() {
+            const data = {
+                mode: currentMode,
+                intro: inputIntro.value,
+                basicInfo: inputBasicInfo.value,
+                basicFields,
+                basicFieldIdCounter,
+                basicPresets,
+                basicPaste: basicPasteInput.value,
+                safety: inputSafety.value,
+                logs,
+                logIdCounter,
+                events,
+                eventIdCounter,
+                mergeMinutes: mergeMinutesInput ? mergeMinutesInput.value : "30",
+                mergeDistance: mergeDistanceInput ? mergeDistanceInput.value : "500",
+                reportStyle: reportStyleSelect ? reportStyleSelect.value : "prose",
+                subject: subjectText.value,
+                subjectUserEdited: subjectText.dataset.userEdited || "",
+                memo: memoInput.value
+            };
+
+            try {
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+                saveStatus.textContent = "自動保存: 保存済み";
+                clearTimeout(window.__saveStatusTimer);
+                window.__saveStatusTimer = setTimeout(() => {
+                    saveStatus.textContent = "自動保存: ON";
+                }, 1200);
+            } catch (e) {
+                console.warn("下書きの自動保存を利用できません", e);
+                saveStatus.textContent = "自動保存: 利用不可";
+            }
+        }
+
+        function loadDraft() {
+            try {
+                let raw = null;
+                try {
+                    raw = localStorage.getItem(STORAGE_KEY);
+                    if (!raw) {
+                        for (const key of LEGACY_STORAGE_KEYS) {
+                            raw = localStorage.getItem(key);
+                            if (raw) break;
+                        }
+                    }
+                } catch (e) {
+                    console.warn("下書き保存領域を読み込めません", e);
+                }
+                if (!raw) return;
+                const data = JSON.parse(raw);
+                if (typeof data.intro === "string") inputIntro.value = data.intro;
+                if (Array.isArray(data.basicFields)) {
+                    basicFields = data.basicFields.map(field => ({
+                        id: Number.isInteger(field.id) ? field.id : basicFieldIdCounter++,
+                        label: String(field.label ?? ''),
+                        value: String(field.value ?? ''),
+                        required: Boolean(field.required)
+                    }));
+                    const maxId = basicFields.reduce((m, f) => Math.max(m, f.id), -1);
+                    basicFieldIdCounter = Math.max(
+                        Number.isInteger(data.basicFieldIdCounter) ? data.basicFieldIdCounter : 0,
+                        maxId + 1
+                    );
+                } else if (typeof data.basicInfo === "string") {
+                    basicFields = parseBasicInfoTextToFields(data.basicInfo);
+                }
+                syncBasicInfoText();
+                if (data.basicPresets && typeof data.basicPresets === "object") {
+                    basicPresets = { ...JSON.parse(JSON.stringify(DEFAULT_PRESETS)), ...data.basicPresets };
+                }
+                if (typeof data.basicPaste === "string") basicPasteInput.value = data.basicPaste;
+                if (typeof data.safety === "string") inputSafety.value = data.safety;
+                if (Array.isArray(data.logs)) logs = data.logs;
+                if (Number.isInteger(data.logIdCounter)) logIdCounter = data.logIdCounter;
+                if (Array.isArray(data.events)) events = data.events;
+                if (Number.isInteger(data.eventIdCounter)) eventIdCounter = data.eventIdCounter;
+                if (data.mergeMinutes !== undefined && mergeMinutesInput) mergeMinutesInput.value = data.mergeMinutes;
+                if (data.mergeDistance !== undefined && mergeDistanceInput) mergeDistanceInput.value = data.mergeDistance;
+                if (typeof data.reportStyle === "string" && reportStyleSelect) reportStyleSelect.value = data.reportStyle;
+                if (typeof data.subject === "string") subjectText.value = data.subject;
+                if (data.subjectUserEdited) subjectText.dataset.userEdited = data.subjectUserEdited;
+                if (typeof data.memo === "string") memoInput.value = data.memo;
+                if (data.mode === "plan" || data.mode === "report") currentMode = data.mode;
+            } catch (e) {
+                console.warn("下書き読み込み失敗", e);
+            }
+        }
+
+        function resetAll() {
+            if (!confirm("現在の入力内容と活動ログを消して、新規作成しますか？")) return;
+            try {
+                localStorage.removeItem(STORAGE_KEY);
+                LEGACY_STORAGE_KEYS.forEach(key => localStorage.removeItem(key));
+            } catch (e) {
+                console.warn("保存データを削除できません", e);
+            }
+            logs = [];
+            logIdCounter = 0;
+            events = [];
+            eventIdCounter = 0;
+            fieldPackageZip = null;
+            fieldPackagePhotoIndex = new Map();
+            if (mergeMinutesInput) mergeMinutesInput.value = "30";
+            if (mergeDistanceInput) mergeDistanceInput.value = "500";
+            if (reportStyleSelect) reportStyleSelect.value = "prose";
+            inputIntro.value = "技術部、観測センターの皆様\n佐藤です。";
+            basicFields = makeDefaultBasicFields();
+            basicPresets = JSON.parse(JSON.stringify(DEFAULT_PRESETS));
+            basicPasteInput.value = "";
+            syncBasicInfoText();
+            inputSafety.value = "・安全運転を心がける。\n・出張前、作業前に天気予報等を確認する。\n・現場での怪我に備えて救急セットを用意する。";
+            subjectText.value = "";
+            memoInput.value = "";
+            timelinePoints = [];
+            timelineVisits = [];
+            timelineInput.value = "";
+            timelineStatus.textContent = "未読込";
+            if (fieldPackageStatus) { fieldPackageStatus.textContent = "未読込"; fieldPackageStatus.className = "text-xs text-gray-500 mt-2"; }
+            delete subjectText.dataset.userEdited;
+            currentMode = "plan";
+            renderBasicFields();
+            switchMode("plan");
+            renderLogs();
+            validateBasicInfo();
+            updatePreview();
+        }
+
+        // 初期化
+        loadDraft();
+        if (dropboxAppKeyInput) dropboxAppKeyInput.value = getDropboxAppKey();
+        renderBasicFields();
+        switchMode(currentMode);
+        validateBasicInfo();
+        renderLogs();
+        renderEvents();
+        updatePreview();
+
+        handleDropboxRedirect()
+            .then(async redirected => {
+                if (!redirected && getDropboxAppKey() &&
+                    (localStorage.getItem(DROPBOX_PC_REFRESH_KEY) || localStorage.getItem(DROPBOX_PC_ACCESS_KEY))) {
+                    await pullDropboxRecords(false);
+                }
+            })
+            .catch(e => { console.error(e); setDropboxStatus(`Dropbox認証エラー：${e.message || e}`, "bad"); });
+    </script>
+</body>
+</html>

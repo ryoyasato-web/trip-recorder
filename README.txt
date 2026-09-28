@@ -1,9 +1,16 @@
-出張現場記録 PWA v0.5
+出張現場記録 PWA v0.6
 
-- 写真を撮る/選ぶと、その時点で写真だけの記録を自動作成
-- 撮影時刻を秒まで保持（EXIF優先、なければファイル時刻）
-- 直近GPSを自動付与
-- 写真だけの記録へ後から作業・メモ・場所名を追記
-- 作業・メモだけの記録も同じ一覧で管理
-- PC用JSONには写真本体を含めず、写真の時刻・枚数・名前だけを含む
-- 写真込みZIPは端末バックアップ用
+主な変更:
+- v0.5の写真即時記録・作業/メモ一元化を維持
+- Dropbox App Folderへ軽量な trip_records.json を自動同期
+- 写真本体はDropboxへ送信しない
+- PKCE認証（App secret不要）
+- オフライン時は端末へ保存し、オンライン復帰後に再同期
+- App keyはアプリ画面から保存
+- PC版は同じDropboxアプリから最新記録を取得
+
+注意:
+- DropboxのRedirect URIに
+  https://ryoyasato-web.github.io/trip-recorder/
+  を登録する
+- App secretをHTML/GitHubへ入れない
