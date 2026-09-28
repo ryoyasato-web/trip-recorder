@@ -7,11 +7,12 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="現場記録">
-<title>出張現場記録 v0.6.1</title>
+<title>出張現場記録 v0.6.2</title>
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="apple-touch-icon" href="./icon-192.png">
 <script src="https://cdn.jsdelivr.net/npm/exif-js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dropbox@10.46.0/dist/Dropbox-sdk.min.js"></script>
 <style>
 :root{
   --blue:#1d4ed8; --blue-dark:#1e3a8a; --blue-soft:#eff6ff;
@@ -76,7 +77,7 @@ input:focus,textarea:focus{border-color:#60a5fa;box-shadow:0 0 0 3px #dbeafe}
 <header>
   <div class="header-row">
     <div>
-      <div class="title">出張現場記録 <span style="font-size:11px;font-weight:500;color:#bfdbfe">v0.6.1</span></div>
+      <div class="title">出張現場記録 <span style="font-size:11px;font-weight:500;color:#bfdbfe">v0.6.2</span></div>
       <div id="clock" class="sub"></div>
     </div>
     <div class="header-actions">
@@ -511,28 +512,39 @@ async function getDropboxAccessToken(){
   localStorage.setItem(DROPBOX_EXPIRES_KEY,String(Date.now()+Number(data.expires_in||14400)*1000));
   return data.access_token;
 }
-async function uploadDropboxJson(token,data){
-  // Browser/PWAではDropbox公式のCORS向け形式を使い、OPTIONS preflightを避ける。
-  const arg=JSON.stringify({path:DROPBOX_FILE,mode:"overwrite",autorename:false,mute:true,strict_conflict:false});
-  const u=new URL("https://content.dropboxapi.com/2/files/upload");
-  u.searchParams.set("authorization",`Bearer ${token}`);
-  u.searchParams.set("arg",arg);
-  u.searchParams.set("reject_cors_preflight","true");
-  const r=await fetch(u.toString(),{
-    method:"POST",
-    headers:{"Content-Type":"text/plain; charset=dropbox-cors-hack"},
-    body:JSON.stringify(data)
-  });
-  if(!r.ok){
-    let detail="";
-    try{detail=await r.text()}catch(e){}
-    let msg=`HTTP ${r.status}`;
-    try{const d=JSON.parse(detail);msg=d.error_summary||d.error?.['.tag']||detail||msg}catch(e){if(detail)msg=detail}
-    if(/missing_scope|not authorized|not permitted/i.test(msg))
-      msg=`${msg}（Dropbox Developer ConsoleのPermissionsで files.content.write を有効化してSubmit後、Dropbox接続を解除→再接続してください）`;
-    throw new Error(msg);
+function dropboxErrorMessage(e){
+  const parts=[];
+  if(e?.status) parts.push(`HTTP ${e.status}`);
+  const err=e?.error;
+  if(typeof err==="string") parts.push(err);
+  else if(err){
+    if(err.error_summary) parts.push(err.error_summary);
+    if(err.user_message?.text) parts.push(err.user_message.text);
+    if(err.error?.[".tag"] && !parts.some(x=>String(x).includes(err.error[".tag"]))) parts.push(err.error[".tag"]);
+    if(err[".tag"] && !parts.some(x=>String(x).includes(err[".tag"]))) parts.push(err[".tag"]);
   }
-  return r.json();
+  if(e?.message && !parts.some(x=>String(x).includes(e.message))) parts.push(e.message);
+  return parts.filter(Boolean).join(" / ") || "Dropbox API error";
+}
+async function uploadDropboxJson(token,data){
+  // 公式Dropbox JavaScript SDKを使う。ブラウザ固有のCORS処理はSDK側に任せる。
+  if(!window.Dropbox?.Dropbox) throw new Error("Dropbox公式SDKを読み込めません。通信状態を確認してください。");
+  const dbx=new window.Dropbox.Dropbox({accessToken:token});
+  const contents=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
+  try{
+    const res=await dbx.filesUpload({
+      path:DROPBOX_FILE,
+      contents,
+      mode:"overwrite",
+      autorename:false,
+      mute:true,
+      strict_conflict:false
+    });
+    return res?.result||res;
+  }catch(e){
+    console.error("Dropbox filesUpload error",e);
+    throw new Error(dropboxErrorMessage(e));
+  }
 }
 async function syncDropboxNow(showMessage=false){
   if(dropboxSyncing)return;

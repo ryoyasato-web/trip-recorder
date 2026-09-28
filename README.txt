@@ -1,3 +1,12 @@
+出張現場記録 PWA v0.6.2
+
+Dropbox同期修正:
+- ブラウザ/PWA向けDropbox公式CORS形式に変更
+- authorization/arg をURLパラメータ化
+- Content-Type: text/plain; charset=dropbox-cors-hack
+- reject_cors_preflight=true
+- 同期失敗時のエラー表示を詳細化
+
 出張現場記録 PWA v0.6
 
 主な変更:
@@ -14,3 +23,5 @@
   https://ryoyasato-web.github.io/trip-recorder/
   を登録する
 - App secretをHTML/GitHubへ入れない
+
+Dropbox同期は公式JavaScript SDKを使用。エラー時は詳細を表示します。
