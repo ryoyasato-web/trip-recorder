@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="現場記録">
-<title>出張現場記録 v0.3</title>
+<title>出張現場記録 v0.5</title>
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="apple-touch-icon" href="./icon-192.png">
 <script src="https://cdn.jsdelivr.net/npm/exif-js"></script>
@@ -67,6 +67,8 @@ input:focus,textarea:focus{border-color:#60a5fa;box-shadow:0 0 0 3px #dbeafe}
 .modal img{width:100%;border-radius:10px;margin-bottom:10px;background:#000;max-height:70vh;object-fit:contain}
 .install-banner{display:none;background:#eff6ff;border:1px solid #bfdbfe;border-radius:12px;padding:10px 12px;margin-bottom:10px;font-size:13px}
 .install-banner.show{display:flex;align-items:center;justify-content:space-between;gap:8px}
+
+.camera-button{display:block;width:100%;border:0;border-radius:18px;padding:24px 14px;background:#1d4ed8;color:white;font-size:21px;font-weight:850;text-align:center;cursor:pointer;box-shadow:0 7px 18px #1d4ed833}.camera-button:active{background:#1e40af}.manual-button{width:100%;border:0;border-radius:14px;background:#0f766e;color:white;padding:13px;font-weight:800;margin-top:10px}.log.photo-only{border-left:4px solid #2563eb}.log.mixed{border-left:4px solid #7c3aed}.badge{display:inline-block;border-radius:999px;padding:3px 7px;font-size:10px;font-weight:700;margin-left:5px}.badge-photo{background:#dbeafe;color:#1d4ed8}.badge-mixed{background:#ede9fe;color:#6d28d9}.photo-times{font-size:12px;color:#1d4ed8;margin-top:6px;line-height:1.5}.log-actions{display:flex;gap:6px;margin-top:8px}.mini{border:1px solid #d1d5db;background:white;border-radius:8px;padding:6px 9px;font-size:12px;color:#374151}.toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);z-index:80;background:#111827;color:white;border-radius:999px;padding:10px 15px;font-size:13px;display:none;box-shadow:0 6px 20px #0004}.toast.show{display:block}
 @media(min-width:700px){.sheet{border-radius:20px;margin-bottom:20px}.sheet-bg{align-items:center}}
 </style>
 </head>
@@ -74,7 +76,7 @@ input:focus,textarea:focus{border-color:#60a5fa;box-shadow:0 0 0 3px #dbeafe}
 <header>
   <div class="header-row">
     <div>
-      <div class="title">出張現場記録 <span style="font-size:11px;font-weight:500;color:#bfdbfe">v0.3</span></div>
+      <div class="title">出張現場記録 <span style="font-size:11px;font-weight:500;color:#bfdbfe">v0.5</span></div>
       <div id="clock" class="sub"></div>
     </div>
     <div class="header-actions">
@@ -91,58 +93,60 @@ input:focus,textarea:focus{border-color:#60a5fa;box-shadow:0 0 0 3px #dbeafe}
     <button class="secondary" onclick="installApp()">追加</button>
   </div>
 
+  <section class="card" style="background:linear-gradient(180deg,#eff6ff,#fff)">
+    <label class="camera-button">
+      <input id="photo-input" type="file" accept="image/*" capture="environment" multiple hidden>
+      📷 写真を撮る
+    </label>
+    <div class="meta" style="text-align:center">撮影・選択した時点で、時刻（秒）＋GPS＋写真情報を自動保存。内容はあとから追記できます。</div>
+  </section>
+
   <section class="card">
     <div style="display:flex;align-items:center;justify-content:space-between">
-      <h2>作業内容</h2>
+      <h2>作業・メモを記録</h2>
       <button class="ghost" onclick="clearActions()">選択解除</button>
     </div>
     <div id="quick-actions" class="action-grid"></div>
+    <textarea id="note" style="margin-top:10px" placeholder="必要ならメモ（例：UDだけ応答がおかしい）"></textarea>
+    <button class="manual-button" onclick="createManualRecord()">🔧 作業・メモを記録</button>
     <details style="margin-top:10px">
       <summary style="font-size:12px;color:#1d4ed8;cursor:pointer">作業ボタンを追加・編集</summary>
-      <div class="small-row">
-        <input id="new-action" placeholder="例：機器撤収">
-        <button class="secondary" onclick="addAction()">追加</button>
-      </div>
+      <div class="small-row"><input id="new-action" placeholder="例：機器撤収"><button class="secondary" onclick="addAction()">追加</button></div>
       <div style="text-align:right;margin-top:5px"><button class="ghost" onclick="resetActions()">標準に戻す</button></div>
     </details>
   </section>
 
   <section class="card">
-    <h2>メモ</h2>
-    <textarea id="note" placeholder="例：UDだけ応答がおかしい。予備機と交換。"></textarea>
-  </section>
-
-  <section class="card">
-    <h2>写真</h2>
-    <label class="photo-button">
-      <input id="photo-input" type="file" accept="image/*" capture="environment" multiple hidden>
-      📷 写真を撮る / 選ぶ
-    </label>
-    <div id="photo-status" class="meta">写真なし</div>
-  </section>
-
-  <section class="card">
-    <div style="display:flex;align-items:center;justify-content:space-between">
-      <h2 style="margin:0">位置</h2>
-      <button class="secondary" onclick="startGPS(true)">GPS更新</button>
-    </div>
+    <div style="display:flex;align-items:center;justify-content:space-between"><h2 style="margin:0">位置</h2><button class="secondary" onclick="startGPS(true)">GPS更新</button></div>
     <div id="gps-detail" class="meta">アプリ起動中に現在地を取得して待機します。</div>
     <input id="location-label" style="margin-top:8px" placeholder="場所名を任意で入力（例：○○観測点）">
   </section>
 
   <section class="card">
-    <div style="display:flex;align-items:center;justify-content:space-between">
-      <h2 style="margin:0">最近の記録</h2>
-      <span id="record-count" class="meta" style="margin:0"></span>
-    </div>
+    <div style="display:flex;align-items:center;justify-content:space-between"><h2 style="margin:0">最近の記録</h2><span id="record-count" class="meta" style="margin:0"></span></div>
+    <div class="meta">写真だけの記録も残ります。「編集・追記」から後で作業内容やメモを足せます。</div>
     <div id="records"></div>
   </section>
 </main>
 
-<div class="record-bar">
-  <button id="record-button" class="record-button" onclick="createRecord()">＋ 現在の記録を追加</button>
+<div id="edit-menu" class="sheet-bg" onclick="if(event.target===this)closeEdit()">
+  <div class="sheet">
+    <div class="sheet-title"><span>記録を編集・追記</span><button class="ghost" onclick="closeEdit()">✕</button></div>
+    <div id="edit-time" style="font-family:monospace;font-weight:800;margin-bottom:10px"></div>
+    <label style="font-size:12px;font-weight:700">作業内容</label>
+    <div id="edit-actions" class="action-grid" style="margin-top:7px"></div>
+    <label style="font-size:12px;font-weight:700;display:block;margin-top:13px">メモ</label>
+    <textarea id="edit-note" style="margin-top:5px"></textarea>
+    <label style="font-size:12px;font-weight:700;display:block;margin-top:13px">場所名</label>
+    <input id="edit-location" style="margin-top:5px">
+    <div id="edit-photo-meta" class="meta" style="margin-top:10px"></div>
+    <label class="sheet-btn" style="display:block;cursor:pointer;text-align:center;color:#1d4ed8">
+      <input id="edit-photo-input" type="file" accept="image/*" capture="environment" multiple hidden>📷 この記録に写真を追加
+    </label>
+    <button class="sheet-btn primary" onclick="saveEdit()">変更を保存</button>
+    <button class="sheet-btn danger" onclick="deleteEditingRecord()">この記録を削除</button>
+  </div>
 </div>
-
 
 <div id="diagnosis-menu" class="sheet-bg" onclick="if(event.target===this)closeDiagnosis()">
   <div class="sheet">
@@ -174,14 +178,15 @@ input:focus,textarea:focus{border-color:#60a5fa;box-shadow:0 0 0 3px #dbeafe}
 <div id="data-menu" class="sheet-bg" onclick="if(event.target===this)closeDataMenu()">
   <div class="sheet">
     <div class="sheet-title"><span>データ管理</span><button class="ghost" onclick="closeDataMenu()">✕</button></div>
-    <button class="sheet-btn primary" onclick="exportPackage()">📦 PC用パッケージを書き出す</button>
+    <button class="sheet-btn primary" onclick="downloadJson()">PC用記録データを書き出す（写真なし）</button>
+    <button class="sheet-btn" onclick="exportPackage()">端末バックアップZIP（写真込み）</button>
     <label class="sheet-btn" style="display:block;cursor:pointer;text-align:center">
       <input id="import-package" type="file" accept=".zip,.json,application/zip,application/json" hidden>
       既存データを読み込む
     </label>
-    <button class="sheet-btn" onclick="downloadJson()">JSONだけを書き出す</button>
+    
     <button class="sheet-btn danger" onclick="clearAllData()">全記録を消去</button>
-    <div class="meta">記録は端末のこのブラウザ内に保存されます。PCへ渡すときはZIPを書き出してください。</div>
+    <div class="meta">PC用データには写真本体を含めず、撮影時刻・枚数・ファイル名だけを含めます。写真本体は端末内に保持します。</div>
   </div>
 </div>
 
@@ -193,25 +198,27 @@ input:focus,textarea:focus{border-color:#60a5fa;box-shadow:0 0 0 3px #dbeafe}
 </div>
 
 <script>
-const STORAGE_KEY="eri_field_recorder_v02";
-const LEGACY_KEY="eri_field_recorder_v01";
-const DB_NAME="eri_field_photos_v02";
+const STORAGE_KEY="eri_field_recorder_v05";
+const LEGACY_KEY="eri_field_recorder_v02";
+const DB_NAME="eri_field_photos_v05";
 const STORE="photos";
 const DEFAULT_ACTIONS=["観測点到着","データ回収","地震計確認","SD交換","バッテリー交換","GPS確認","アンテナ交換","電源確認","移動開始","作業終了"];
 
-let actions=[...DEFAULT_ACTIONS], selectedActions=[], records=[], idCounter=0, pendingPhotos=[];
+let actions=[...DEFAULT_ACTIONS], selectedActions=[], records=[], idCounter=0;
 let latestGPS={lat:null,lng:null,accuracy:null,time:null};
-let gpsWatchId=null, deferredInstall=null;
+let gpsWatchId=null, deferredInstall=null, editingId=null;
 
 const $=id=>document.getElementById(id);
-const qa=$("quick-actions"),note=$("note"),photoInput=$("photo-input"),photoStatus=$("photo-status"),
-locationLabel=$("location-label"),gpsChip=$("gps-chip"),gpsDetail=$("gps-detail"),recordsEl=$("records"),
+const qa=$("quick-actions"),note=$("note"),photoInput=$("photo-input"),locationLabel=$("location-label"),gpsChip=$("gps-chip"),gpsDetail=$("gps-detail"),recordsEl=$("records"),
 recordCount=$("record-count"),dataMenu=$("data-menu"),importPackageInput=$("import-package"),
 photoModal=$("photo-modal"),photoModalContent=$("photo-modal-content"),installBanner=$("install-banner"),
-diagnosisMenu=$("diagnosis-menu"),diagResults=$("diag-results"),diagSummary=$("diag-summary"),diagInstallButton=$("diag-install-button");
+diagnosisMenu=$("diagnosis-menu"),diagResults=$("diag-results"),diagSummary=$("diag-summary"),diagInstallButton=$("diag-install-button"),
+editMenu=$("edit-menu"),editActionsEl=$("edit-actions"),editNote=$("edit-note"),editLocation=$("edit-location"),editPhotoMeta=$("edit-photo-meta"),editPhotoInput=$("edit-photo-input");
 
 function esc(v){return String(v??"").replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#039;")}
 function nowText(sec=false){const d=new Date();return `${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,"0")}/${String(d.getDate()).padStart(2,"0")} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}${sec?":"+String(d.getSeconds()).padStart(2,"0"):""}`}
+function parseExifDate(v){const m=String(v||"").match(/^(\d{4}):(\d{2}):(\d{2})\s+(\d{2}):(\d{2}):(\d{2})/);if(!m)return null;const d=new Date(+m[1],+m[2]-1,+m[3],+m[4],+m[5],+m[6]);return Number.isNaN(d.getTime())?null:d}
+function migrateRecord(r){const photos=Array.isArray(r.photos)?r.photos:(Array.isArray(r.photoNames)?r.photoNames.map(n=>({name:n,takenAt:r.time||""})):[]);return {...r,time:r.time||nowText(true),actions:Array.isArray(r.actions)?r.actions:[],note:r.note||"",photos,photoCount:photos.length||Number(r.photoCount)||0,photoNames:photos.length?photos.map(p=>p.name):(r.photoNames||[])};}
 function tick(){ $("clock").textContent=nowText(true); renderGPS(); }
 setInterval(tick,1000);tick();
 
@@ -220,11 +227,11 @@ function save(){
 }
 function load(){
   try{
-    const raw=localStorage.getItem(STORAGE_KEY)||localStorage.getItem(LEGACY_KEY);if(!raw)return;
+    const raw=localStorage.getItem(STORAGE_KEY)||localStorage.getItem("eri_field_recorder_v04")||localStorage.getItem("eri_field_recorder_v03")||localStorage.getItem(LEGACY_KEY);if(!raw)return;
     const d=JSON.parse(raw);
     if(Array.isArray(d.actions))actions=d.actions;
     if(Array.isArray(d.selectedActions))selectedActions=d.selectedActions;
-    if(Array.isArray(d.records))records=d.records;
+    if(Array.isArray(d.records))records=d.records.map(migrateRecord);
     if(Number.isInteger(d.idCounter))idCounter=d.idCounter;
     if(typeof d.note==="string")note.value=d.note;
     if(typeof d.locationLabel==="string")locationLabel.value=d.locationLabel;
@@ -244,8 +251,11 @@ function clearActions(){selectedActions=[];renderActions();save()}
 function addAction(){const e=$("new-action"),v=e.value.trim();if(!v)return;if(!actions.includes(v))actions.push(v);selectedActions=[...new Set([...selectedActions,v])];e.value="";renderActions();save()}
 function resetActions(){if(confirm("作業ボタンを標準状態に戻しますか？")){actions=[...DEFAULT_ACTIONS];selectedActions=[];renderActions();save()}}
 
-photoInput.addEventListener("change",e=>{pendingPhotos.push(...[...(e.target.files||[])].filter(f=>f.type.startsWith("image/")));e.target.value="";renderPhotoStatus()});
-function renderPhotoStatus(){photoStatus.textContent=pendingPhotos.length?`${pendingPhotos.length}枚：${pendingPhotos.slice(0,3).map(f=>f.name).join(" / ")}${pendingPhotos.length>3?` ほか${pendingPhotos.length-3}枚`:""}`:"写真なし"}
+function currentGpsSnapshot(){const age=gpsAge(),ok=latestGPS.lat!==null&&age<5*60*1000;return ok?{lat:latestGPS.lat,lng:latestGPS.lng,gpsAccuracy:latestGPS.accuracy,gpsAgeSec:Math.round(age/1000)}:{lat:null,lng:null,gpsAccuracy:null,gpsAgeSec:null}}
+function exifMeta(file){return new Promise(resolve=>{const fallback=file.lastModified?new Date(file.lastModified):new Date();const finish=d=>resolve({name:file.name||"photo.jpg",takenAt:`${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,"0")}/${String(d.getDate()).padStart(2,"0")} ${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}:${String(d.getSeconds()).padStart(2,"0")}`});if(typeof EXIF==="undefined"){finish(fallback);return}try{EXIF.getData(file,function(){finish(parseExifDate(EXIF.getTag(this,"DateTimeOriginal"))||parseExifDate(EXIF.getTag(this,"DateTimeDigitized"))||fallback)})}catch(e){finish(fallback)}})}
+photoInput.addEventListener("change",async e=>{const files=[...(e.target.files||[])].filter(f=>f.type.startsWith("image/"));e.target.value="";for(const f of files)await createPhotoRecord(f)});
+async function createPhotoRecord(file){const meta=await exifMeta(file),id=idCounter++,gps=currentGpsSnapshot();const rec={id,uid:crypto.randomUUID?crypto.randomUUID():`${Date.now()}-${id}`,createdAt:new Date().toISOString(),time:meta.takenAt,location:locationLabel.value.trim(),...gps,actions:[],note:"",photos:[meta],photoCount:1,photoNames:[meta.name],kind:"photo"};records.push(rec);try{await storePhotos(id,[file])}catch(e){console.warn(e)}save();renderRecords();if(navigator.vibrate)navigator.vibrate(60);alert(`写真を自動記録しました
+${meta.takenAt}`)}
 
 function gpsAge(){return latestGPS.time?Math.max(0,Date.now()-latestGPS.time):Infinity}
 function renderGPS(){
@@ -274,44 +284,46 @@ async function photosFor(recordId){const db=await openDB();const rows=await new 
 async function deletePhotos(recordId){try{const rows=await photosFor(recordId);if(!rows.length)return;const db=await openDB();await new Promise((res,rej)=>{const tx=db.transaction(STORE,"readwrite"),s=tx.objectStore(STORE);rows.forEach(r=>s.delete(r.id));tx.oncomplete=res;tx.onerror=()=>rej(tx.error)});db.close()}catch(e){console.warn(e)}}
 async function clearPhotoDB(){try{const db=await openDB();await new Promise((res,rej)=>{const tx=db.transaction(STORE,"readwrite");tx.objectStore(STORE).clear();tx.oncomplete=res;tx.onerror=()=>rej(tx.error)});db.close()}catch(e){}}
 
-async function createRecord(){
-  const memo=note.value.trim(),photos=[...pendingPhotos];
-  if(!selectedActions.length&&!memo&&!photos.length){alert("作業内容・メモ・写真のいずれかを追加してください。");return}
-  const btn=$("record-button");btn.disabled=true;btn.textContent="記録中…";
-  const id=idCounter++,age=gpsAge(),useGPS=latestGPS.lat!==null&&age<5*60*1000;
-  const rec={id,time:nowText(false),location:locationLabel.value.trim(),lat:useGPS?latestGPS.lat:null,lng:useGPS?latestGPS.lng:null,gpsAccuracy:useGPS?latestGPS.accuracy:null,gpsAgeSec:useGPS?Math.round(age/1000):null,actions:[...selectedActions],note:memo,photoCount:photos.length,photoNames:photos.map(f=>f.name)};
-  records.push(rec);
-  try{await storePhotos(id,photos)}catch(e){console.warn(e);alert("記録は保存しましたが、写真本体の保存に失敗しました。")}
-  selectedActions=[];note.value="";pendingPhotos=[];renderActions();renderPhotoStatus();renderRecords();save();
-  btn.disabled=false;btn.textContent="＋ 現在の記録を追加";
-  if(navigator.vibrate)navigator.vibrate(60);
+async function createManualRecord(){
+  const memo=note.value.trim();if(!selectedActions.length&&!memo){alert("作業内容かメモを入力してください。");return}
+  const id=idCounter++,gps=currentGpsSnapshot();
+  records.push({id,uid:crypto.randomUUID?crypto.randomUUID():`${Date.now()}-${id}`,createdAt:new Date().toISOString(),time:nowText(true),location:locationLabel.value.trim(),...gps,actions:[...selectedActions],note:memo,photos:[],photoCount:0,photoNames:[],kind:"manual"});
+  selectedActions=[];note.value="";renderActions();renderRecords();save();if(navigator.vibrate)navigator.vibrate(50);
 }
+function recordKind(r){const hasPhoto=(r.photos?.length||r.photoCount)>0,hasText=(r.actions?.length||0)>0||Boolean(r.note);return hasPhoto&&hasText?"mixed":hasPhoto?"photo":"manual"}
 function renderRecords(){
   recordCount.textContent=`${records.length}件`;recordsEl.innerHTML="";
   if(!records.length){recordsEl.innerHTML='<div class="meta" style="text-align:center;padding:20px">まだ記録がありません。</div>';return}
-  [...records].sort((a,b)=>b.time.localeCompare(a.time)).slice(0,20).forEach(r=>{
-    const items=[...(r.actions||[]),...(r.note?[r.note]:[])],place=r.location||(r.lat!==null&&r.lat!==undefined?`${Number(r.lat).toFixed(6)}, ${Number(r.lng).toFixed(6)}`:"場所未取得");
-    const d=document.createElement("div");d.className="log";d.innerHTML=`
-      <div class="log-head"><div class="log-time">${esc(r.time)}</div><button class="ghost" onclick="removeRecord(${r.id})">✕</button></div>
+  [...records].sort((a,b)=>String(b.time).localeCompare(String(a.time))).slice(0,40).forEach(r=>{
+    const items=[...(r.actions||[]),...(r.note?[r.note]:[])],place=r.location||(r.lat!==null&&r.lat!==undefined?`${Number(r.lat).toFixed(6)}, ${Number(r.lng).toFixed(6)}`:"場所未取得"),photos=Array.isArray(r.photos)?r.photos:[];
+    const kind=recordKind(r),badge=kind==="photo"?'<span class="badge badge-photo">写真のみ</span>':kind==="mixed"?'<span class="badge badge-mixed">追記済み</span>':"";
+    const d=document.createElement("div");d.className=`log ${kind==="photo"?"photo-only":kind==="mixed"?"mixed":""}`;d.innerHTML=`
+      <div class="log-head"><div><span class="log-time">${esc(r.time)}</span>${badge}</div></div>
       <div class="log-place">📍 ${esc(place)}</div>
-      <div class="log-task">${items.map(x=>`<div>・${esc(x)}</div>`).join("")}</div>
-      ${r.photoCount?`<button class="photo-link" onclick="showPhotos(${r.id})">📷 写真を見る（${r.photoCount}枚）</button>`:""}`;
-    recordsEl.appendChild(d);
+      ${items.length?`<div class="log-task">${items.map(x=>`<div>・${esc(x)}</div>`).join("")}</div>`:""}
+      ${photos.length?`<div class="photo-times">📷 ${photos.length}枚　${photos.map(p=>esc((p.takenAt||"").split(" ").pop())).join(" / ")}</div>`:""}
+      <div class="log-actions">${photos.length?`<button class="mini" onclick="showPhotos(${r.id})">写真を見る</button>`:""}<button class="mini" onclick="openEdit(${r.id})">編集・追記</button></div>`;recordsEl.appendChild(d);
   });
 }
-async function removeRecord(id){if(!confirm("この記録を削除しますか？"))return;records=records.filter(r=>r.id!==id);await deletePhotos(id);renderRecords();save()}
+function renderEditActions(rec){editActionsEl.innerHTML="";actions.forEach(a=>{const selected=rec.actions.includes(a),b=document.createElement("button");b.className="action"+(selected?" selected":"");b.textContent=a;b.onclick=()=>{rec.actions=selected?rec.actions.filter(x=>x!==a):[...rec.actions,a];renderEditActions(rec)};editActionsEl.appendChild(b)})}
+function openEdit(id){const rec=records.find(r=>r.id===id);if(!rec)return;editingId=id;$("edit-time").textContent=rec.time;editNote.value=rec.note||"";editLocation.value=rec.location||"";renderEditActions(rec);renderEditPhotoMeta(rec);editMenu.classList.add("open")}
+function closeEdit(){editingId=null;editMenu.classList.remove("open")}
+function renderEditPhotoMeta(rec){const ps=Array.isArray(rec.photos)?rec.photos:[];editPhotoMeta.innerHTML=ps.length?`📷 ${ps.length}枚<br>${ps.map(p=>`${esc(p.takenAt||"")}　${esc(p.name||"")}`).join("<br>")}`:"写真なし"}
+function saveEdit(){const rec=records.find(r=>r.id===editingId);if(!rec)return;rec.note=editNote.value.trim();rec.location=editLocation.value.trim();rec.kind=recordKind(rec);save();renderRecords();closeEdit()}
+editPhotoInput.addEventListener("change",async e=>{const rec=records.find(r=>r.id===editingId),files=[...(e.target.files||[])].filter(f=>f.type.startsWith("image/"));e.target.value="";if(!rec||!files.length)return;if(!Array.isArray(rec.photos))rec.photos=[];for(const file of files){const meta=await exifMeta(file);rec.photos.push(meta);await storePhotos(rec.id,[file])}rec.photoCount=rec.photos.length;rec.photoNames=rec.photos.map(p=>p.name);save();renderRecords();renderEditPhotoMeta(rec)});
+async function deleteEditingRecord(){if(editingId===null||!confirm("この記録を削除しますか？"))return;const id=editingId;records=records.filter(r=>r.id!==id);await deletePhotos(id);save();renderRecords();closeEdit()}
 async function showPhotos(id){const rows=await photosFor(id);photoModalContent.innerHTML="";if(!rows.length)photoModalContent.innerHTML="<p>写真がありません。</p>";rows.forEach(r=>{const url=URL.createObjectURL(r.blob),wrap=document.createElement("div");wrap.dataset.url=url;wrap.innerHTML=`<img src="${url}" alt="${esc(r.name)}"><div class="meta">${esc(r.name)}</div>`;photoModalContent.appendChild(wrap)});photoModal.classList.add("open")}
 function closePhotoModal(){photoModalContent.querySelectorAll("[data-url]").forEach(x=>URL.revokeObjectURL(x.dataset.url));photoModalContent.innerHTML="";photoModal.classList.remove("open")}
 
 function openDataMenu(){dataMenu.classList.add("open")}
 function closeDataMenu(){dataMenu.classList.remove("open")}
-function packageData(){return{version:"eri-field-v2",exportedAt:new Date().toISOString(),records,actions}}
+function packageData(){return{version:"eri-field-unified-v1",exportedAt:new Date().toISOString(),records,actions}}
 async function exportPackage(){
   if(!records.length){alert("記録がありません。");return}
   if(typeof JSZip==="undefined"){alert("ZIP機能を読み込めません。ネット接続後に一度アプリを開いてください。");return}
   const zip=new JSZip();zip.file("trip_records.json",JSON.stringify(packageData(),null,2));const folder=zip.folder("photos");
   for(const r of records){const rows=await photosFor(r.id);rows.forEach((p,i)=>folder.file(`${r.id}_${i+1}_${p.name}`,p.blob))}
-  const blob=await zip.generateAsync({type:"blob"});downloadBlob(blob,`trip_records_${new Date().toISOString().slice(0,10)}.zip`);closeDataMenu();
+  const blob=await zip.generateAsync({type:"blob"});downloadBlob(blob,`trip_backup_${new Date().toISOString().slice(0,10)}.zip`);closeDataMenu();
 }
 function downloadJson(){downloadBlob(new Blob([JSON.stringify(packageData(),null,2)],{type:"application/json"}),`trip_records_${new Date().toISOString().slice(0,10)}.json`);closeDataMenu()}
 function downloadBlob(blob,name){const u=URL.createObjectURL(blob),a=document.createElement("a");a.href=u;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(u),1000)}
@@ -324,11 +336,11 @@ importPackageInput.addEventListener("change",async e=>{
     if(!confirm(`${data.records.length}件を読み込み、現在の記録を置き換えますか？`))return;
     await clearPhotoDB();records=data.records;actions=Array.isArray(data.actions)?data.actions:[...DEFAULT_ACTIONS];idCounter=records.reduce((m,r)=>Math.max(m,Number(r.id)||0),-1)+1;
     if(zip){for(const pf of Object.values(zip.files).filter(x=>!x.dir&&x.name.startsWith("photos/"))){const base=pf.name.split("/").pop(),m=base.match(/^(\d+)_\d+_(.*)$/);if(!m)continue;const rid=Number(m[1]),name=m[2],blob=await pf.async("blob");await storePhotos(rid,[new File([blob],name,{type:blob.type||"image/jpeg"})])}}
-    selectedActions=[];pendingPhotos=[];renderActions();renderPhotoStatus();renderRecords();save();closeDataMenu();
+    selectedActions=[];pendingPhotos=[];renderActions();renderRecords();save();closeDataMenu();
   }catch(err){console.error(err);alert("読み込みに失敗しました。")}
   e.target.value="";
 });
-async function clearAllData(){if(!confirm("全記録とアプリ内写真を削除しますか？"))return;records=[];idCounter=0;selectedActions=[];pendingPhotos=[];note.value="";locationLabel.value="";await clearPhotoDB();renderActions();renderPhotoStatus();renderRecords();save();closeDataMenu()}
+async function clearAllData(){if(!confirm("全記録とアプリ内写真を削除しますか？"))return;records=[];idCounter=0;selectedActions=[];note.value="";locationLabel.value="";await clearPhotoDB();renderActions();renderRecords();save();closeDataMenu()}
 
 note.addEventListener("input",save);locationLabel.addEventListener("input",save);
 
@@ -511,7 +523,7 @@ window.addEventListener("appinstalled",()=>installBanner.classList.remove("show"
 if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("./sw.js").catch(console.warn))}
 document.addEventListener("visibilitychange",()=>{if(!document.hidden)startGPS(false)});
 
-load();renderActions();renderRecords();renderPhotoStatus();startGPS(false);
+load();renderActions();renderRecords();startGPS(false);
 </script>
 </body>
 </html>
