@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>出張メール・報告ジェネレーター PC v0.6.0 (ERI 総合観測室向け)</title>
+    <title>出張メール・報告ジェネレーター PC v0.6.1 (ERI 総合観測室向け)</title>
     <!-- Tailwind CSS for styling -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- EXIF.js for reading image metadata -->
@@ -34,7 +34,7 @@
 
     <header class="bg-blue-800 text-white p-4 shadow-md flex-shrink-0 flex justify-between items-center">
         <div>
-            <h1 class="text-xl font-bold">出張メール・報告ジェネレーター <span class="text-sm font-normal text-blue-200">PC v0.6.0</span></h1>
+            <h1 class="text-xl font-bold">出張メール・報告ジェネレーター <span class="text-sm font-normal text-blue-200">PC v0.6.1</span></h1>
             <p class="text-xs text-blue-200">現場記録を長期保存し、出張報告まで一元管理</p>
         </div>
         <div class="flex items-center gap-3">
@@ -351,6 +351,26 @@
     </section>
 
 
+    <div id="event-map-modal" class="fixed inset-0 z-[60] hidden items-center justify-center bg-black/70 p-4">
+        <div class="bg-white rounded-xl shadow-xl w-full max-w-5xl max-h-[92vh] flex flex-col overflow-hidden">
+            <div class="flex items-center justify-between border-b p-3">
+                <div>
+                    <h3 class="font-bold text-gray-800">位置を地図で確認</h3>
+                    <div id="event-map-title" class="text-xs text-gray-500"></div>
+                </div>
+                <button onclick="closeEventMap()" class="text-2xl text-gray-400 hover:text-gray-700 px-2">×</button>
+            </div>
+            <div class="p-3 border-b bg-gray-50 flex flex-wrap items-center gap-2">
+                <span id="event-map-coords" class="font-mono text-xs text-gray-700"></span>
+                <a id="event-map-external" href="#" target="_blank" rel="noopener"
+                   class="text-xs text-blue-700 border border-blue-200 bg-white rounded px-2 py-1 hover:bg-blue-50">
+                    外部地図で開く
+                </a>
+            </div>
+            <iframe id="event-map-frame" title="位置地図" class="w-full flex-1 min-h-[520px] border-0" loading="lazy"></iframe>
+        </div>
+    </div>
+
     <div id="package-photo-modal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/70 p-4">
         <div class="bg-white rounded-xl shadow-xl w-full max-w-5xl max-h-[92vh] flex flex-col overflow-hidden">
             <div class="flex items-center justify-between border-b p-3">
@@ -454,6 +474,11 @@
         const packagePhotoModal = document.getElementById('package-photo-modal');
         const packagePhotoContent = document.getElementById('package-photo-content');
         const packagePhotoTitle = document.getElementById('package-photo-title');
+        const eventMapModal = document.getElementById('event-map-modal');
+        const eventMapTitle = document.getElementById('event-map-title');
+        const eventMapCoords = document.getElementById('event-map-coords');
+        const eventMapExternal = document.getElementById('event-map-external');
+        const eventMapFrame = document.getElementById('event-map-frame');
         const editorMain = document.getElementById('editor-main');
         const archiveView = document.getElementById('archive-view');
         const archiveList = document.getElementById('archive-list');
@@ -1308,7 +1333,11 @@
                     </div>
                     <div class="bg-white border rounded-xl p-5">
                         <h4 class="font-bold text-gray-800 mb-3">整理後イベント</h4>
-                        <div class="space-y-2">${evs.map(e=>`<div class="border rounded p-3"><div class="font-bold text-sm">${escapeHtml(e.date||"")} ${escapeHtml(e.startTime||"")}${e.endTime&&e.endTime!==e.startTime?"～"+escapeHtml(e.endTime):""}　${escapeHtml(e.location||"")}</div><div class="text-sm mt-1">${escapeHtml(e.prose||"")}</div></div>`).join("") || '<div class="text-gray-400">なし</div>'}</div>
+                        <div class="space-y-2">${evs.map(e=>`<div class="border rounded p-3">
+                            <div class="font-bold text-sm">${escapeHtml(e.date||"")} ${escapeHtml(e.startTime||"")}${e.endTime&&e.endTime!==e.startTime?"～"+escapeHtml(e.endTime):""}　${escapeHtml(eventDisplayLocation(e)||"")}</div>
+                            <div class="text-sm mt-1">${escapeHtml(e.prose||"")}</div>
+                            ${Number.isFinite(Number(e.lat)) && Number.isFinite(Number(e.lng)) ? `<button onclick='openArchiveCoordinateMap(${JSON.stringify(e.lat)},${JSON.stringify(e.lng)},${JSON.stringify(eventDisplayLocation(e)||"位置情報")})' class="text-xs text-blue-700 mt-2 hover:underline">🗺 地図で確認</button>` : ""}
+                        </div>`).join("") || '<div class="text-gray-400">なし</div>'}</div>
                     </div>
                     <div class="bg-white border rounded-xl p-5">
                         <h4 class="font-bold text-gray-800 mb-1">元の現場記録 <span class="text-xs text-gray-400 font-normal">（報告本文に出なかった情報も保存）</span></h4>
@@ -1317,6 +1346,23 @@
                     </div>
                 </div>`;
         }
+        function openArchiveCoordinateMap(latValue, lngValue, label = "位置情報") {
+            const lat = Number(latValue), lng = Number(lngValue);
+            if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+            const deltaLat = 0.005, deltaLng = 0.007;
+            const bbox = [lng-deltaLng, lat-deltaLat, lng+deltaLng, lat+deltaLat].join(",");
+            const osm = new URL("https://www.openstreetmap.org/export/embed.html");
+            osm.searchParams.set("bbox", bbox);
+            osm.searchParams.set("layer", "mapnik");
+            osm.searchParams.set("marker", `${lat},${lng}`);
+            eventMapFrame.src = osm.toString();
+            eventMapTitle.textContent = String(label || "位置情報");
+            eventMapCoords.textContent = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+            eventMapExternal.href = `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=17/${lat}/${lng}`;
+            eventMapModal.classList.remove("hidden");
+            eventMapModal.classList.add("flex");
+        }
+
         function renderRawRecordCard(r) {
             const photos = Array.isArray(r.photos) ? r.photos : [];
             const actions = Array.isArray(r.actions) ? r.actions : [];
@@ -1330,7 +1376,8 @@
                 </div>
                 ${actions.length ? `<div class="text-sm mt-2">作業：${escapeHtml(actions.join(" / "))}</div>` : ""}
                 ${r.note ? `<div class="text-sm mt-1">メモ：${escapeHtml(r.note)}</div>` : ""}
-                ${coords ? `<div class="text-[11px] text-gray-500 mt-2">GPS：${escapeHtml(coords)}${r.gpsAccuracy ? " / 精度 約"+escapeHtml(r.gpsAccuracy)+"m" : ""}</div>` : ""}
+                ${coords ? `<div class="text-[11px] text-gray-500 mt-2">GPS：${escapeHtml(coords)}${r.gpsAccuracy ? " / 精度 約"+escapeHtml(r.gpsAccuracy)+"m" : ""}</div>
+                <button onclick='openArchiveCoordinateMap(${JSON.stringify(r.lat)},${JSON.stringify(r.lng)},${JSON.stringify(r.location||r.time||"位置情報")})' class="text-xs text-blue-700 mt-1 hover:underline">🗺 地図で確認</button>` : ""}
                 ${photos.length ? `<div class="text-[11px] text-blue-700 mt-1">${photos.map(p=>`📷 ${escapeHtml(p.takenAt||"")}　${escapeHtml(p.name||"")}`).join("<br>")}</div>` : ""}
             </div>`;
         }
@@ -1450,6 +1497,124 @@
             return /[。！？!?]$/.test(t) ? t : t + "。";
         }
 
+
+        function eventCoordsText(event) {
+            if (!Number.isFinite(Number(event?.lat)) || !Number.isFinite(Number(event?.lng))) return "";
+            return `${Number(event.lat).toFixed(6)}, ${Number(event.lng).toFixed(6)}`;
+        }
+
+        function eventDisplayLocation(event) {
+            const mode = event?.locationMode || "manual";
+            if (mode === "auto") return String(event?.autoLocation || "").trim();
+            if (mode === "coords") return eventCoordsText(event);
+            if (mode === "none") return "";
+            return String(event?.location || "").trim();
+        }
+
+        function eventReportLocation(event) {
+            // 緯度経度は確認用。報告本文には出さない。
+            const mode = event?.locationMode || "manual";
+            if (mode === "auto") return String(event?.autoLocation || "").trim();
+            if (mode === "manual") return String(event?.location || "").trim();
+            return "";
+        }
+
+        function setEventLocationMode(id, mode) {
+            const ev = events.find(e => e.id === id);
+            if (!ev) return;
+            ev.locationMode = mode;
+            if (mode === "auto" && !ev.autoLocation && Number.isFinite(Number(ev.lat)) && Number.isFinite(Number(ev.lng))) {
+                lookupEventAutoLocation(id);
+                return;
+            }
+            ev.prose = generateEventProse(ev);
+            renderEvents();
+            updatePreview();
+            saveDraft();
+        }
+
+        async function lookupEventAutoLocation(id) {
+            const ev = events.find(e => e.id === id);
+            if (!ev || !Number.isFinite(Number(ev.lat)) || !Number.isFinite(Number(ev.lng))) {
+                alert("この記録には位置情報がありません。");
+                return;
+            }
+            const previous = ev.autoLocation || "";
+            ev.autoLocation = "取得中…";
+            renderEvents();
+            try {
+                const url = new URL("https://nominatim.openstreetmap.org/reverse");
+                url.searchParams.set("format", "jsonv2");
+                url.searchParams.set("lat", ev.lat);
+                url.searchParams.set("lon", ev.lng);
+                url.searchParams.set("zoom", "18");
+                url.searchParams.set("addressdetails", "1");
+                url.searchParams.set("namedetails", "1");
+                url.searchParams.set("accept-language", "ja");
+
+                const res = await fetch(url.toString(), { headers: { "Accept-Language": "ja" } });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const data = await res.json();
+                const a = data.address || {};
+                const explicitName =
+                    data.name ||
+                    data.namedetails?.name ||
+                    a.building || a.amenity || a.office || a.university || a.school ||
+                    a.tourism || a.shop || a.leisure || a.railway || "";
+
+                const areaParts = [
+                    a.suburb || a.quarter || a.neighbourhood || "",
+                    a.city || a.town || a.village || a.municipality || ""
+                ].filter(Boolean);
+
+                let label = String(explicitName || "").trim();
+                if (!label) label = areaParts.join(" ");
+                if (!label && data.display_name) label = String(data.display_name).split(",").slice(0, 3).join(" ").trim();
+                if (!label) throw new Error("地名を取得できませんでした");
+
+                ev.autoLocation = label;
+                ev.autoLocationFull = data.display_name || label;
+                ev.locationMode = "auto";
+                ev.prose = generateEventProse(ev);
+                renderEvents();
+                updatePreview();
+                saveDraft();
+            } catch (e) {
+                console.error(e);
+                ev.autoLocation = previous;
+                renderEvents();
+                alert(`自動地名の取得に失敗しました：${e.message || e}`);
+            }
+        }
+
+        function openEventMap(id) {
+            const ev = events.find(e => e.id === id);
+            if (!ev || !Number.isFinite(Number(ev.lat)) || !Number.isFinite(Number(ev.lng))) {
+                alert("この記録には地図表示できる位置情報がありません。");
+                return;
+            }
+            const lat = Number(ev.lat), lng = Number(ev.lng);
+            const deltaLat = 0.005;
+            const deltaLng = 0.007;
+            const bbox = [lng-deltaLng, lat-deltaLat, lng+deltaLng, lat+deltaLat].join(",");
+            const osm = new URL("https://www.openstreetmap.org/export/embed.html");
+            osm.searchParams.set("bbox", bbox);
+            osm.searchParams.set("layer", "mapnik");
+            osm.searchParams.set("marker", `${lat},${lng}`);
+            eventMapFrame.src = osm.toString();
+            eventMapTitle.textContent = `${ev.date || ""} ${ev.startTime || ""}　${eventDisplayLocation(ev) || "位置情報"}`;
+            eventMapCoords.textContent = `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+            eventMapExternal.href = `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=17/${lat}/${lng}`;
+            eventMapModal.classList.remove("hidden");
+            eventMapModal.classList.add("flex");
+        }
+
+        function closeEventMap() {
+            eventMapFrame.src = "about:blank";
+            eventMapModal.classList.add("hidden");
+            eventMapModal.classList.remove("flex");
+        }
+
         function generateEventProse(event) {
             const tasks = uniqueNonEmpty(event.tasks || []);
             const arrived = tasks.includes("観測点到着");
@@ -1468,7 +1633,7 @@
                 .map(actionPhrase)
                 .filter(Boolean);
 
-            const place = /^-?\d+(?:\.\d+)?,\s*-?\d+(?:\.\d+)?$/.test(String(event.location||"").trim()) ? "" : (event.location || "");
+            const place = eventReportLocation(event);
             let first = "";
 
             if (moving && !mainActions.length && !notes.length) {
@@ -1552,6 +1717,9 @@
                     endTime: `${String(end.getHours()).padStart(2,'0')}:${String(end.getMinutes()).padStart(2,'0')}`,
                     date: `${start.getFullYear()}/${String(start.getMonth()+1).padStart(2,'0')}/${String(start.getDate()).padStart(2,'0')}`,
                     location: eventLocationFromLogs(group),
+                    locationMode: "",
+                    autoLocation: "",
+                    autoLocationFull: "",
                     lat: coords.lat,
                     lng: coords.lng,
                     tasks,
@@ -1559,6 +1727,11 @@
                     sourceLogIds: group.map(l => l.id),
                     prose: ""
                 };
+                const named = String(event.location || "").trim();
+                event.locationMode = named && !/^-?\d+(?:\.\d+)?,\s*-?\d+(?:\.\d+)?$/.test(named)
+                    ? "manual"
+                    : (Number.isFinite(Number(event.lat)) && Number.isFinite(Number(event.lng)) ? "coords" : "manual");
+                if (event.locationMode === "coords") event.location = "";
                 event.prose = generateEventProse(event);
                 return event;
             });
@@ -1617,10 +1790,34 @@
                             <div class="font-bold text-sm text-indigo-800">イベント ${idx + 1}　${escapeHtml(ev.date)} ${escapeHtml(range)}</div>
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-2 mt-2">
                                 <div>
-                                    <label class="text-[11px] text-gray-500">場所</label>
+                                    <div class="flex items-center justify-between gap-2 mb-1">
+                                        <label class="text-[11px] text-gray-500">場所の表示</label>
+                                        ${Number.isFinite(Number(ev.lat)) && Number.isFinite(Number(ev.lng)) ? `
+                                        <button onclick="openEventMap(${ev.id})" class="text-[11px] text-blue-700 hover:underline">🗺 地図で確認</button>` : ""}
+                                    </div>
+                                    <select onchange="setEventLocationMode(${ev.id}, this.value)"
+                                        class="w-full border rounded p-2 text-sm bg-white">
+                                        <option value="manual" ${(ev.locationMode||"manual")==="manual"?"selected":""}>手入力・観測点名</option>
+                                        <option value="auto" ${ev.locationMode==="auto"?"selected":""} ${!Number.isFinite(Number(ev.lat))?"disabled":""}>自動取得した建物名・地名</option>
+                                        <option value="coords" ${ev.locationMode==="coords"?"selected":""} ${!Number.isFinite(Number(ev.lat))?"disabled":""}>緯度経度（確認用）</option>
+                                        <option value="none" ${ev.locationMode==="none"?"selected":""}>場所を報告しない</option>
+                                    </select>
+
+                                    ${(ev.locationMode||"manual")==="manual" ? `
                                     <input value="${escapeHtml(ev.location || "")}"
-                                        onchange="updateEvent(${ev.id}, 'location', this.value)"
-                                        class="w-full border rounded p-2 text-sm" placeholder="場所">
+                                        onchange="updateEvent(${ev.id}, 'location', this.value); regenerateEventProse(${ev.id})"
+                                        class="w-full border rounded p-2 text-sm mt-2" placeholder="観測点名・任意の場所名">` : ""}
+
+                                    ${ev.locationMode==="auto" ? `
+                                    <div class="mt-2 flex gap-2">
+                                        <div class="flex-1 border rounded p-2 text-sm bg-emerald-50 min-h-[40px]">${escapeHtml(ev.autoLocation || "未取得")}</div>
+                                        <button onclick="lookupEventAutoLocation(${ev.id})" class="text-xs border rounded px-3 bg-white hover:bg-gray-50">再取得</button>
+                                    </div>
+                                    ${ev.autoLocationFull && ev.autoLocationFull !== ev.autoLocation ? `<div class="text-[10px] text-gray-400 mt-1">${escapeHtml(ev.autoLocationFull)}</div>` : ""}` : ""}
+
+                                    ${ev.locationMode==="coords" ? `
+                                    <div class="mt-2 border rounded p-2 font-mono text-sm bg-gray-50">${escapeHtml(eventCoordsText(ev) || "位置情報なし")}</div>
+                                    <div class="text-[10px] text-gray-400 mt-1">緯度経度は報告本文には出しません。</div>` : ""}
                                 </div>
                                 <div>
                                     <label class="text-[11px] text-gray-500">含まれる記録</label>
@@ -1651,7 +1848,8 @@
             if (!ev) return;
 
             packagePhotoContent.innerHTML = "";
-            packagePhotoTitle.textContent = `${ev.date} ${ev.startTime}${ev.location ? " / " + ev.location : ""}`;
+            const photoLoc = eventDisplayLocation(ev);
+            packagePhotoTitle.textContent = `${ev.date} ${ev.startTime}${photoLoc ? " / " + photoLoc : ""}`;
 
             if (!fieldPackageZip) {
                 packagePhotoContent.innerHTML = '<div class="text-gray-500">JSONのみの読み込み、またはページ再読み込み後のため写真本体を参照できません。ZIPを再度読み込んでください。</div>';
@@ -2259,7 +2457,7 @@
                                 reportText += `${prose}\n`;
                             } else {
                                 const range = ev.startTime === ev.endTime ? ev.startTime : `${ev.startTime}～${ev.endTime}`;
-                                const displayLocation = /^-?\d+(?:\.\d+)?,\s*-?\d+(?:\.\d+)?$/.test(String(ev.location||"").trim()) ? "" : (ev.location || "");
+                                const displayLocation = eventReportLocation(ev);
                                 reportText += `${range}${displayLocation ? "　"+displayLocation : ""}\n`;
                                 (ev.tasks || []).filter(t => t !== "写真記録" && !/^写真撮影時刻：/.test(t)).forEach(t => reportText += `　・${t}\n`);
                             }
@@ -2426,7 +2624,21 @@
                 if (typeof data.safety === "string") inputSafety.value = data.safety;
                 if (Array.isArray(data.logs)) logs = data.logs;
                 if (Number.isInteger(data.logIdCounter)) logIdCounter = data.logIdCounter;
-                if (Array.isArray(data.events)) events = data.events;
+                if (Array.isArray(data.events)) {
+                    events = data.events.map(ev => {
+                        const out = {...ev};
+                        if (!out.locationMode) {
+                            const loc = String(out.location || "").trim();
+                            out.locationMode = loc && !/^-?\d+(?:\.\d+)?,\s*-?\d+(?:\.\d+)?$/.test(loc)
+                                ? "manual"
+                                : (Number.isFinite(Number(out.lat)) && Number.isFinite(Number(out.lng)) ? "coords" : "manual");
+                            if (out.locationMode === "coords" && /^-?\d+(?:\.\d+)?,\s*-?\d+(?:\.\d+)?$/.test(loc)) out.location = "";
+                        }
+                        if (out.autoLocation === undefined) out.autoLocation = "";
+                        if (out.autoLocationFull === undefined) out.autoLocationFull = "";
+                        return out;
+                    });
+                }
                 if (Number.isInteger(data.eventIdCounter)) eventIdCounter = data.eventIdCounter;
                 if (data.mergeMinutes !== undefined && mergeMinutesInput) mergeMinutesInput.value = data.mergeMinutes;
                 if (data.mergeDistance !== undefined && mergeDistanceInput) mergeDistanceInput.value = data.mergeDistance;
