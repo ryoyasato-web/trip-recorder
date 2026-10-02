@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>出張メール・報告ジェネレーター PC v0.6.10 (ERI 総合観測室向け)</title>
+    <title>出張メール・報告ジェネレーター PC v0.6.11 (ERI 総合観測室向け)</title>
     <!-- Tailwind CSS for styling -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- EXIF.js for reading image metadata -->
@@ -34,7 +34,7 @@
 
     <header class="bg-blue-800 text-white p-4 shadow-md flex-shrink-0 flex justify-between items-center">
         <div>
-            <h1 class="text-xl font-bold">出張メール・報告ジェネレーター <span class="text-sm font-normal text-blue-200">PC v0.6.10</span></h1>
+            <h1 class="text-xl font-bold">出張メール・報告ジェネレーター <span class="text-sm font-normal text-blue-200">PC v0.6.11</span></h1>
             <p class="text-xs text-blue-200">現場記録を長期保存し、出張報告まで一元管理</p>
         </div>
         <div class="flex items-center gap-3">
@@ -1888,7 +1888,6 @@
                 lookupEventAutoLocation(id);
                 return;
             }
-            ev.prose = generateEventProse(ev);
             renderEvents();
             updatePreview();
             saveDraft();
@@ -1936,7 +1935,6 @@
                 ev.autoLocation = label;
                 ev.autoLocationFull = data.display_name || label;
                 ev.locationMode = "auto";
-                ev.prose = generateEventProse(ev);
                 renderEvents();
                 updatePreview();
                 saveDraft();
@@ -1994,37 +1992,58 @@
                 .map(actionPhrase)
                 .filter(Boolean);
 
-            const place = eventReportLocation(event);
             let first = "";
 
+            // 時刻・場所は本文に入れない。見出し側にだけ表示する。
             if (moving && !mainActions.length && !notes.length) {
-                first = place ? `${event.startTime}頃、${place}から次の地点へ移動を開始した。`
-                              : `${event.startTime}頃、次の地点へ移動を開始した。`;
-            } else if (place) {
-                if (arrived) {
-                    first = `${event.startTime}頃、${place}に到着`;
-                    if (mainActions.length) first += `し、${joinJapaneseClauses(mainActions)}`;
-                    first += "。";
-                } else if (mainActions.length) {
-                    first = `${event.startTime}頃、${place}にて${joinJapaneseClauses(mainActions)}。`;
-                } else {
-                    first = `${event.startTime}頃、${place}で記録を行った。`;
+                first = "次の地点へ移動を開始した。";
+            } else if (arrived) {
+                if (mainActions.length) {
+                    first = `到着後、${joinJapaneseClauses(mainActions)}。`;
+                } else if (!notes.length) {
+                    first = "到着した。";
                 }
-            } else {
-                if (arrived) {
-                    first = `${event.startTime}頃、現地に到着`;
-                    if (mainActions.length) first += `し、${joinJapaneseClauses(mainActions)}`;
-                    first += "。";
-                } else if (mainActions.length) {
-                    first = `${event.startTime}頃、${joinJapaneseClauses(mainActions)}。`;
-                } else if (notes.length) {
-                    first = `${event.startTime}頃、作業記録を行った。`;
-                }
+            } else if (mainActions.length) {
+                first = `${joinJapaneseClauses(mainActions)}。`;
+            } else if (notes.length) {
+                first = "作業記録を行った。";
             }
 
             const noteSentences = notes.map(ensurePeriod).join("");
             const endSentence = ended && !/作業を終了/.test(first) ? "一連の作業を終了した。" : "";
             return `${first}${noteSentences}${endSentence}`.trim();
+        }
+
+        function stripLegacyEventHeaderFromProse(event, proseValue) {
+            let text = String(proseValue || "").trim();
+            if (!text) return text;
+
+            const esc = s => String(s || "").replace(/[.*+?^$()|[\]{}\\]/g, "\\$&");
+            const time = esc(event?.startTime || "");
+            const place = esc(eventReportLocation(event) || eventDisplayLocation(event) || "");
+
+            // 旧自動生成文の先頭「10:15頃、○○観測点にて…」等だけを除去する。
+            if (time) {
+                const patterns = [];
+                if (place) {
+                    patterns.push(new RegExp("^" + time + "頃、" + place + "(?:にて|で|から)"));
+                    patterns.push(new RegExp("^" + time + "頃、" + place + "に到着(?:し、)?"));
+                }
+                patterns.push(new RegExp("^" + time + "頃、現地に到着(?:し、)?"));
+                patterns.push(new RegExp("^" + time + "頃、"));
+                for (const re of patterns) {
+                    if (re.test(text)) {
+                        text = text.replace(re, "");
+                        break;
+                    }
+                }
+            }
+
+            text = text.replace(/^にて/, "").replace(/^で/, "");
+            if (/^次の地点へ移動を開始した。/.test(text)) return text;
+            if (/^に到着/.test(text)) text = text.replace(/^に到着(?:し、)?/, "到着後、");
+            if (/^到着し、/.test(text)) text = text.replace(/^到着し、/, "到着後、");
+            return text.trim();
         }
 
         function eventSourceKey(event) {
@@ -2132,7 +2151,7 @@
 
                 const wasEdited = previous ? eventProseWasEdited(previous) : false;
                 if (previous && wasEdited) {
-                    event.prose = previous.prose;
+                    event.prose = stripLegacyEventHeaderFromProse(previous, previous.prose);
                     event.proseEdited = true;
                 } else {
                     event.prose = generateEventProse(event);
@@ -2201,7 +2220,10 @@
                 el.innerHTML = `
                     <div class="flex items-start justify-between gap-2">
                         <div class="flex-1 min-w-0">
-                            <div class="font-bold text-sm text-indigo-800">イベント ${idx + 1}　${escapeHtml(ev.date)} ${escapeHtml(range)}</div>
+                            <div class="font-bold text-sm text-indigo-800 flex flex-wrap gap-x-2">
+                                <span>イベント ${idx + 1}　${escapeHtml(ev.date)} ${escapeHtml(range)}</span>
+                                ${eventReportLocation(ev) ? `<span class="text-gray-800">　${escapeHtml(eventReportLocation(ev))}</span>` : ""}
+                            </div>
                             <div class="mt-2">
                                 <div>
                                     <div class="flex items-center justify-between gap-2 mb-1">
@@ -2219,7 +2241,7 @@
 
                                     ${(ev.locationMode||"manual")==="manual" ? `
                                     <input value="${escapeHtml(ev.location || "")}"
-                                        onchange="updateEvent(${ev.id}, 'location', this.value); regenerateEventProse(${ev.id})"
+                                        onchange="updateEvent(${ev.id}, 'location', this.value); renderEvents()"
                                         class="w-full border rounded p-2 text-sm mt-2" placeholder="観測点名・任意の場所名">` : ""}
 
                                     ${ev.locationMode==="auto" ? `
@@ -2958,14 +2980,17 @@
                         }
 
                         dayEvents.forEach(ev => {
-                            const prose = String(ev.prose || "").trim();
+                            const range = ev.startTime === ev.endTime ? ev.startTime : `${ev.startTime}～${ev.endTime}`;
+                            const displayLocation = eventReportLocation(ev);
+                            reportText += `${range}${displayLocation ? "　"+displayLocation : ""}\n`;
+
+                            const prose = stripLegacyEventHeaderFromProse(ev, ev.prose || "").trim();
                             if (prose) {
                                 reportText += `${prose}\n`;
                             } else {
-                                const range = ev.startTime === ev.endTime ? ev.startTime : `${ev.startTime}～${ev.endTime}`;
-                                const displayLocation = eventReportLocation(ev);
-                                reportText += `${range}${displayLocation ? "　"+displayLocation : ""}\n`;
-                                (ev.tasks || []).filter(t => t !== "写真記録" && !/^写真撮影時刻：/.test(t)).forEach(t => reportText += `　・${t}\n`);
+                                (ev.tasks || [])
+                                    .filter(t => t !== "写真記録" && !/^写真撮影時刻：/.test(t))
+                                    .forEach(t => reportText += `　・${t}\n`);
                             }
                         });
                         if (showDateHeadings) reportText += "\n";
@@ -3045,8 +3070,9 @@
             window.open(url, '_blank');
         }
 
-        const STORAGE_KEY = "eri_trip_report_pc_v0610";
+        const STORAGE_KEY = "eri_trip_report_pc_v0611";
         const LEGACY_STORAGE_KEYS = [
+            "eri_trip_report_pc_v0610",
             "eri_trip_report_pc_v069",
             "eri_trip_report_pc_v068",
             "eri_trip_report_pc_v067",
@@ -3152,6 +3178,7 @@
                         }
                         if (out.autoLocation === undefined) out.autoLocation = "";
                         if (out.autoLocationFull === undefined) out.autoLocationFull = "";
+                        if (typeof out.prose === "string") out.prose = stripLegacyEventHeaderFromProse(out, out.prose);
                         if (out.proseEdited === undefined) out.proseEdited = eventProseWasEdited(out);
                         return out;
                     });
