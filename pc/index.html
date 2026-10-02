@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>出張メール・報告ジェネレーター PC v0.6.5 (ERI 総合観測室向け)</title>
+    <title>出張メール・報告ジェネレーター PC v0.6.6 (ERI 総合観測室向け)</title>
     <!-- Tailwind CSS for styling -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- EXIF.js for reading image metadata -->
@@ -34,7 +34,7 @@
 
     <header class="bg-blue-800 text-white p-4 shadow-md flex-shrink-0 flex justify-between items-center">
         <div>
-            <h1 class="text-xl font-bold">出張メール・報告ジェネレーター <span class="text-sm font-normal text-blue-200">PC v0.6.5</span></h1>
+            <h1 class="text-xl font-bold">出張メール・報告ジェネレーター <span class="text-sm font-normal text-blue-200">PC v0.6.6</span></h1>
             <p class="text-xs text-blue-200">現場記録を長期保存し、出張報告まで一元管理</p>
         </div>
         <div class="flex items-center gap-3">
@@ -165,48 +165,94 @@
                     <div id="field-package-status" class="text-xs text-gray-500 mt-2">未読込</div>
                 </section>
 
-                <section class="mb-6">
-                    <div class="flex flex-wrap items-center justify-between gap-2 border-b pb-2 mb-3">
-                        <h2 class="text-lg font-bold text-gray-700">4. 現場記録を自動整理</h2>
+                <section class="mb-6 rounded-xl border border-gray-200 bg-white overflow-hidden">
+                    <div class="flex flex-wrap items-center justify-between gap-3 border-b bg-gray-50 px-4 py-3">
+                        <div>
+                            <h2 class="text-lg font-bold text-gray-800">4. 現場記録の確認・自動整理</h2>
+                            <p class="text-[11px] text-gray-500 mt-1">取り込んだ元記録を確認してから、近い時刻・場所ごとにまとめて報告文を作ります。</p>
+                        </div>
                         <div class="flex items-center gap-2">
                             <label class="text-xs text-gray-500">出力形式</label>
-                            <select id="report-style" class="text-xs border rounded px-2 py-1 bg-white" onchange="updatePreview(); saveDraft()">
+                            <select id="report-style" class="text-xs border rounded-lg px-2 py-1.5 bg-white" onchange="updatePreview(); saveDraft()">
                                 <option value="prose">文章形式</option>
                                 <option value="timeline">時系列・箇条書き</option>
                             </select>
                         </div>
                     </div>
 
-                    <div class="rounded-lg border bg-indigo-50 p-3">
-                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 items-end">
-                            <div>
-                                <label class="text-xs font-bold text-gray-700 block mb-1">同じ作業とみなす時間</label>
-                                <div class="flex items-center gap-1">
-                                    <input id="merge-minutes" type="number" min="1" max="180" value="30"
-                                        class="w-full border rounded p-2 text-sm bg-white">
-                                    <span class="text-xs text-gray-500">分</span>
+                    <div class="p-4 border-b border-gray-100">
+                        <div class="flex flex-col gap-3">
+                            <div class="flex flex-wrap justify-between items-start gap-3">
+                                <div>
+                                    <div class="text-sm font-bold text-gray-800">① 取り込んだ記録を確認</div>
+                                    <p class="text-[11px] text-gray-500 mt-1">
+                                        不要な記録を外したり、場所・作業内容を修正できます。ここで外してもDropboxの保存記録は消えません。
+                                    </p>
+                                </div>
+                                <div class="flex flex-wrap gap-2">
+                                    <button onclick="pullDropboxRecords(true)" class="text-xs bg-blue-700 hover:bg-blue-800 text-white px-3 py-2 rounded-lg font-bold shadow-sm">
+                                        ＋ Dropboxから追加
+                                    </button>
+                                    <button onclick="addManualLog()" class="text-xs bg-white hover:bg-gray-50 text-gray-700 border border-gray-300 px-3 py-2 rounded-lg font-bold">
+                                        ＋ 手動で追加
+                                    </button>
                                 </div>
                             </div>
-                            <div>
-                                <label class="text-xs font-bold text-gray-700 block mb-1">同じ場所とみなす距離</label>
-                                <div class="flex items-center gap-1">
-                                    <input id="merge-distance" type="number" min="10" max="10000" value="500"
-                                        class="w-full border rounded p-2 text-sm bg-white">
-                                    <span class="text-xs text-gray-500">m</span>
+
+                            <div id="dropbox-log-tools" class="hidden rounded-lg border border-gray-200 bg-gray-50 p-3">
+                                <div class="flex flex-wrap gap-2 items-center">
+                                    <span id="dropbox-log-selection-status" class="text-xs font-bold text-gray-700 mr-1"></span>
+                                    <button onclick="setAllDropboxLogSelection(true)" class="text-xs bg-white border border-gray-200 rounded-lg px-3 py-1.5 hover:bg-gray-100">全選択</button>
+                                    <button onclick="setAllDropboxLogSelection(false)" class="text-xs bg-white border border-gray-200 rounded-lg px-3 py-1.5 hover:bg-gray-100">選択解除</button>
+                                    <button onclick="excludeSelectedDropboxLogs()" class="text-xs bg-red-50 border border-red-200 text-red-700 hover:bg-red-100 rounded-lg px-3 py-1.5 font-bold">選択した記録を外す</button>
+                                    <button onclick="clearAllDropboxImportedLogs()" class="text-xs bg-white border border-red-200 text-red-600 hover:bg-red-50 rounded-lg px-3 py-1.5">Dropbox分を全部外す</button>
                                 </div>
                             </div>
-                            <button onclick="buildEventsFromLogs(true)"
-                                class="bg-indigo-700 hover:bg-indigo-800 text-white font-bold px-4 py-2 rounded shadow">
-                                ✨ 自動整理・文章生成
-                            </button>
+
+                            <div id="logs-container" class="space-y-3">
+                                <div id="empty-state" class="text-center text-gray-400 py-8 text-sm rounded-lg border border-dashed border-gray-300 bg-gray-50">
+                                    まだ現場記録がありません。「Dropboxから追加」または「手動で追加」から記録を追加してください。
+                                </div>
+                            </div>
                         </div>
-                        <p class="text-[11px] text-gray-600 mt-2">
-                            近い時刻・近い場所の記録をまとめます。「移動開始」は原則として区切りにします。整理後の文章は自由に修正できます。
-                        </p>
                     </div>
 
-                    <div id="events-summary" class="text-xs text-gray-500 mt-2">まだ整理していません。</div>
-                    <div id="events-container" class="space-y-3 mt-3"></div>
+                    <div class="p-4">
+                        <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+                            <div>
+                                <div class="text-sm font-bold text-gray-800">② 自動整理して報告文を作る</div>
+                                <p class="text-[11px] text-gray-500 mt-1">近い時刻・場所の記録をまとめます。「移動開始」は原則として区切りにします。</p>
+                            </div>
+                        </div>
+
+                        <div class="rounded-lg border border-indigo-200 bg-indigo-50 p-3">
+                            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 items-end">
+                                <div>
+                                    <label class="text-xs font-bold text-gray-700 block mb-1">同じ作業とみなす時間</label>
+                                    <div class="flex items-center gap-1">
+                                        <input id="merge-minutes" type="number" min="1" max="180" value="30"
+                                            class="w-full border rounded p-2 text-sm bg-white">
+                                        <span class="text-xs text-gray-500">分</span>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label class="text-xs font-bold text-gray-700 block mb-1">同じ場所とみなす距離</label>
+                                    <div class="flex items-center gap-1">
+                                        <input id="merge-distance" type="number" min="10" max="10000" value="500"
+                                            class="w-full border rounded p-2 text-sm bg-white">
+                                        <span class="text-xs text-gray-500">m</span>
+                                    </div>
+                                </div>
+                                <button onclick="buildEventsFromLogs(true)"
+                                    class="bg-indigo-700 hover:bg-indigo-800 text-white font-bold px-4 py-2 rounded-lg shadow">
+                                    ✨ 自動整理・文章生成
+                                </button>
+                            </div>
+                        </div>
+
+                        <div id="events-summary" class="text-xs text-gray-500 mt-3">まだ整理していません。</div>
+                        <div id="events-container" class="space-y-3 mt-3"></div>
+                    </div>
                 </section>
 
                 <section class="mb-6 rounded-lg border border-indigo-200 bg-indigo-50 p-4">
@@ -265,44 +311,7 @@
                 </div>
             </section>
 
-            <section class="flex-1 flex flex-col min-h-[300px] rounded-xl border border-gray-200 bg-gray-50/70 p-4 mb-4">
-                <div class="flex flex-col gap-3 mb-4">
-                    <div class="flex flex-wrap justify-between items-start gap-3">
-                        <div>
-                            <h2 class="text-lg font-bold text-gray-800">7. 現場記録の確認・整理</h2>
-                            <p class="text-[11px] text-gray-500 mt-1">
-                                取り込んだ記録を確認し、報告に使わないものだけ外せます。ここで外してもDropboxの保存記録は消えません。
-                            </p>
                         </div>
-                        <div class="flex flex-wrap gap-2">
-                            <button onclick="pullDropboxRecords(true)" class="text-xs bg-blue-700 hover:bg-blue-800 text-white px-3 py-2 rounded-lg font-bold shadow-sm">
-                                ＋ Dropboxから追加
-                            </button>
-                            <button onclick="addManualLog()" class="text-xs bg-white hover:bg-gray-50 text-gray-700 border border-gray-300 px-3 py-2 rounded-lg font-bold">
-                                ＋ 手動で追加
-                            </button>
-                        </div>
-                    </div>
-
-                    <div id="dropbox-log-tools" class="hidden rounded-lg border border-gray-200 bg-white p-3">
-                        <div class="flex flex-wrap gap-2 items-center">
-                            <span id="dropbox-log-selection-status" class="text-xs font-bold text-gray-700 mr-1"></span>
-                            <button onclick="setAllDropboxLogSelection(true)" class="text-xs bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 hover:bg-gray-100">全選択</button>
-                            <button onclick="setAllDropboxLogSelection(false)" class="text-xs bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 hover:bg-gray-100">選択解除</button>
-                            <button onclick="excludeSelectedDropboxLogs()" class="text-xs bg-red-50 border border-red-200 text-red-700 hover:bg-red-100 rounded-lg px-3 py-1.5 font-bold">選択した記録を外す</button>
-                            <button onclick="clearAllDropboxImportedLogs()" class="text-xs bg-white border border-red-200 text-red-600 hover:bg-red-50 rounded-lg px-3 py-1.5">Dropbox分を全部外す</button>
-                        </div>
-                    </div>
-                </div>
-                
-                <div id="logs-container" class="space-y-3 flex-1">
-                    <!-- ログアイテムがここに動的に生成されます -->
-                    <div id="empty-state" class="text-center text-gray-400 py-10 text-sm rounded-lg border border-dashed border-gray-300 bg-white">
-                        まだ現場記録がありません。「Dropboxから追加」または「手動で追加」から記録を追加してください。
-                    </div>
-                </div>
-            </section>
-            </div>
         </div>
 
         <!-- 右側：プレビュー・出力エリア -->
@@ -2844,8 +2853,9 @@
             window.open(url, '_blank');
         }
 
-        const STORAGE_KEY = "eri_trip_report_pc_v065";
+        const STORAGE_KEY = "eri_trip_report_pc_v066";
         const LEGACY_STORAGE_KEYS = [
+            "eri_trip_report_pc_v065",
             "eri_trip_report_pc_v064",
             "eri_trip_report_pc_v063",
             "eri_trip_report_pc_v062",
