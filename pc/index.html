@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>出張メール・報告ジェネレーター PC v0.6.9 (ERI 総合観測室向け)</title>
+    <title>出張メール・報告ジェネレーター PC v0.6.10 (ERI 総合観測室向け)</title>
     <!-- Tailwind CSS for styling -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- EXIF.js for reading image metadata -->
@@ -34,7 +34,7 @@
 
     <header class="bg-blue-800 text-white p-4 shadow-md flex-shrink-0 flex justify-between items-center">
         <div>
-            <h1 class="text-xl font-bold">出張メール・報告ジェネレーター <span class="text-sm font-normal text-blue-200">PC v0.6.9</span></h1>
+            <h1 class="text-xl font-bold">出張メール・報告ジェネレーター <span class="text-sm font-normal text-blue-200">PC v0.6.10</span></h1>
             <p class="text-xs text-blue-200">現場記録を長期保存し、出張報告まで一元管理</p>
         </div>
         <div class="flex items-center gap-3">
@@ -2027,7 +2027,30 @@
             return `${first}${noteSentences}${endSentence}`.trim();
         }
 
+        function eventSourceKey(event) {
+            return (Array.isArray(event?.sourceLogIds) ? event.sourceLogIds : [])
+                .map(Number)
+                .filter(Number.isFinite)
+                .sort((a,b)=>a-b)
+                .join(",");
+        }
+
+        function eventProseWasEdited(event) {
+            if (!event) return false;
+            if (event.proseEdited === true) return true;
+            if (event.proseEdited === false) return false;
+            const prose = String(event.prose || "").trim();
+            if (!prose) return false;
+            try {
+                return prose !== String(generateEventProse(event) || "").trim();
+            } catch (e) {
+                return false;
+            }
+        }
+
         function buildEventsFromLogs(userInitiated = false) {
+            const previousEvents = Array.isArray(events) ? events.map(e => ({...e})) : [];
+            const previousBySource = new Map(previousEvents.map(e => [eventSourceKey(e), e]));
             const sourceLogs = logs
                 .filter(l => l.time)
                 .map(l => ({...l, _date: parseLogDate(l.time)}))
@@ -2071,9 +2094,12 @@
                 const end = group[group.length - 1]._date;
                 const tasks = uniqueNonEmpty(group.flatMap(splitTasks));
                 const photoCount = group.reduce((sum,l) => sum + (Number(l.photoCount) || 0), 0);
+                const sourceLogIds = group.map(l => l.id);
+                const sourceKey = sourceLogIds.map(Number).filter(Number.isFinite).sort((a,b)=>a-b).join(",");
+                const previous = previousBySource.get(sourceKey) || null;
 
                 const event = {
-                    id: eventIdCounter++,
+                    id: previous?.id ?? eventIdCounter++,
                     startTime: `${String(start.getHours()).padStart(2,'0')}:${String(start.getMinutes()).padStart(2,'0')}`,
                     endTime: `${String(end.getHours()).padStart(2,'0')}:${String(end.getMinutes()).padStart(2,'0')}`,
                     date: `${start.getFullYear()}/${String(start.getMonth()+1).padStart(2,'0')}/${String(start.getDate()).padStart(2,'0')}`,
@@ -2085,15 +2111,33 @@
                     lng: coords.lng,
                     tasks,
                     photoCount,
-                    sourceLogIds: group.map(l => l.id),
-                    prose: ""
+                    sourceLogIds,
+                    prose: "",
+                    proseEdited: false
                 };
+
                 const named = String(event.location || "").trim();
                 event.locationMode = named && !/^-?\d+(?:\.\d+)?,\s*-?\d+(?:\.\d+)?$/.test(named)
                     ? "manual"
                     : (Number.isFinite(Number(event.lat)) && Number.isFinite(Number(event.lng)) ? "coords" : "manual");
                 if (event.locationMode === "coords") event.location = "";
-                event.prose = generateEventProse(event);
+
+                // 元記録の構成が同一なら、ユーザーが調整した表示場所を維持する。
+                if (previous) {
+                    event.location = previous.location ?? event.location;
+                    event.locationMode = previous.locationMode || event.locationMode;
+                    event.autoLocation = previous.autoLocation || "";
+                    event.autoLocationFull = previous.autoLocationFull || "";
+                }
+
+                const wasEdited = previous ? eventProseWasEdited(previous) : false;
+                if (previous && wasEdited) {
+                    event.prose = previous.prose;
+                    event.proseEdited = true;
+                } else {
+                    event.prose = generateEventProse(event);
+                    event.proseEdited = false;
+                }
                 return event;
             });
 
@@ -2113,6 +2157,7 @@
             const ev = events.find(e => e.id === id);
             if (!ev) return;
             ev[field] = value;
+            if (field === "prose") ev.proseEdited = true;
             updatePreview();
             saveDraft();
         }
@@ -2121,6 +2166,7 @@
             const ev = events.find(e => e.id === id);
             if (!ev) return;
             ev.prose = generateEventProse(ev);
+            ev.proseEdited = false;
             renderEvents();
             updatePreview();
             saveDraft();
@@ -2197,7 +2243,10 @@
                             </div>
                             <div class="mt-2">
                                 <div class="flex items-center justify-between gap-2">
-                                    <label class="text-[11px] text-gray-500">報告文（自由に修正可）</label>
+                                    <div class="flex items-center gap-2">
+                                        <label class="text-[11px] text-gray-500">報告文（自由に修正可）</label>
+                                        ${ev.proseEdited ? '<span class="text-[10px] bg-amber-100 text-amber-800 rounded px-1.5 py-0.5">手修正を保持</span>' : ""}
+                                    </div>
                                     <button onclick="regenerateEventProse(${ev.id})" class="text-[11px] text-indigo-700 hover:underline">文を再生成</button>
                                 </div>
                                 <textarea oninput="updateEvent(${ev.id}, 'prose', this.value)"
@@ -2996,8 +3045,9 @@
             window.open(url, '_blank');
         }
 
-        const STORAGE_KEY = "eri_trip_report_pc_v069";
+        const STORAGE_KEY = "eri_trip_report_pc_v0610";
         const LEGACY_STORAGE_KEYS = [
+            "eri_trip_report_pc_v069",
             "eri_trip_report_pc_v068",
             "eri_trip_report_pc_v067",
             "eri_trip_report_pc_v066",
@@ -3102,6 +3152,7 @@
                         }
                         if (out.autoLocation === undefined) out.autoLocation = "";
                         if (out.autoLocationFull === undefined) out.autoLocationFull = "";
+                        if (out.proseEdited === undefined) out.proseEdited = eventProseWasEdited(out);
                         return out;
                     });
                 }
