@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>出張メール・報告ジェネレーター PC v0.6.8 (ERI 総合観測室向け)</title>
+    <title>出張メール・報告ジェネレーター PC v0.6.9 (ERI 総合観測室向け)</title>
     <!-- Tailwind CSS for styling -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- EXIF.js for reading image metadata -->
@@ -34,7 +34,7 @@
 
     <header class="bg-blue-800 text-white p-4 shadow-md flex-shrink-0 flex justify-between items-center">
         <div>
-            <h1 class="text-xl font-bold">出張メール・報告ジェネレーター <span class="text-sm font-normal text-blue-200">PC v0.6.8</span></h1>
+            <h1 class="text-xl font-bold">出張メール・報告ジェネレーター <span class="text-sm font-normal text-blue-200">PC v0.6.9</span></h1>
             <p class="text-xs text-blue-200">現場記録を長期保存し、出張報告まで一元管理</p>
         </div>
         <div class="flex items-center gap-3">
@@ -230,15 +230,18 @@
                     </div>
 
                     <!-- ③ 元記録確認 -->
-                    <div class="p-4 border-b border-gray-100">
-                        <div class="flex flex-wrap justify-between items-start gap-3 mb-3">
-                            <div>
-                                <div class="text-sm font-bold text-gray-800">③ 取り込んだ記録を確認・修正</div>
-                                <p class="text-[11px] text-gray-500 mt-1">
-                                    不要な記録を外したり、場所・作業内容を修正できます。ここで外してもDropboxの保存記録は消えません。
-                                </p>
+                    <details id="raw-records-details" class="border-b border-gray-100" open>
+                        <summary class="cursor-pointer select-none px-4 py-3 bg-white hover:bg-gray-50">
+                            <div class="inline-flex flex-wrap items-center gap-2">
+                                <span class="text-sm font-bold text-gray-800">③ 元記録を確認・修正</span>
+                                <span id="raw-records-count" class="text-[11px] text-gray-500 bg-gray-100 rounded-full px-2 py-0.5">0件</span>
+                                <span class="text-[11px] text-gray-400">必要なときだけ開く</span>
                             </div>
-                        </div>
+                        </summary>
+                        <div class="px-4 pb-4">
+                            <p class="text-[11px] text-gray-500 mb-3">
+                                不要な記録を外したり、場所・作業内容を修正できます。ここで外してもDropboxの保存記録は消えません。
+                            </p>
 
                         <div id="dropbox-log-tools" class="hidden rounded-lg border border-gray-200 bg-gray-50 p-3 mb-3">
                             <div class="flex flex-wrap gap-2 items-center">
@@ -255,10 +258,11 @@
                                 まだ現場記録がありません。上の「Dropboxから追加」または「手動で追加」から追加してください。
                             </div>
                         </div>
-                    </div>
+                        </div>
+                    </details>
 
                     <!-- ④ 自動整理 -->
-                    <div class="p-4">
+                    <div id="auto-organize-section" class="p-4">
                         <div class="flex flex-wrap items-start justify-between gap-3 mb-3">
                             <div>
                                 <div class="text-sm font-bold text-gray-800">④ 自動整理して報告文を作る</div>
@@ -554,6 +558,9 @@
         const dropboxPickerShowOutside = document.getElementById('dropbox-picker-show-outside');
         const dropboxLogTools = document.getElementById('dropbox-log-tools');
         const dropboxLogSelectionStatus = document.getElementById('dropbox-log-selection-status');
+        const rawRecordsDetails = document.getElementById('raw-records-details');
+        const rawRecordsCount = document.getElementById('raw-records-count');
+        const autoOrganizeSection = document.getElementById('auto-organize-section');
         const editorMain = document.getElementById('editor-main');
         const archiveView = document.getElementById('archive-view');
         const archiveList = document.getElementById('archive-list');
@@ -2093,6 +2100,13 @@
             renderEvents();
             updatePreview();
             saveDraft();
+
+            if (userInitiated && events.length) {
+                if (rawRecordsDetails) rawRecordsDetails.open = false;
+                if (autoOrganizeSection) {
+                    requestAnimationFrame(() => autoOrganizeSection.scrollIntoView({ behavior: "smooth", block: "start" }));
+                }
+            }
         }
 
         function updateEvent(id, field, value) {
@@ -2142,7 +2156,7 @@
                     <div class="flex items-start justify-between gap-2">
                         <div class="flex-1 min-w-0">
                             <div class="font-bold text-sm text-indigo-800">イベント ${idx + 1}　${escapeHtml(ev.date)} ${escapeHtml(range)}</div>
-                            <div class="grid grid-cols-1 md:grid-cols-2 gap-2 mt-2">
+                            <div class="mt-2">
                                 <div>
                                     <div class="flex items-center justify-between gap-2 mb-1">
                                         <label class="text-[11px] text-gray-500">場所の表示</label>
@@ -2173,10 +2187,13 @@
                                     <div class="mt-2 border rounded p-2 font-mono text-sm bg-gray-50">${escapeHtml(eventCoordsText(ev) || "位置情報なし")}</div>
                                     <div class="text-[10px] text-gray-400 mt-1">緯度経度は報告本文には出しません。</div>` : ""}
                                 </div>
-                                <div>
-                                    <label class="text-[11px] text-gray-500">含まれる記録</label>
-                                    <div class="text-xs text-gray-600 border rounded bg-gray-50 p-2 min-h-[38px]">${escapeHtml(tasks || "（作業内容なし）")}</div>
-                                </div>
+
+                                <details class="mt-2 rounded-lg border border-gray-200 bg-gray-50">
+                                    <summary class="cursor-pointer px-3 py-2 text-[11px] text-gray-600">
+                                        元記録を確認（${ev.sourceLogIds?.length || 0}件）
+                                    </summary>
+                                    <div class="px-3 pb-3 text-xs text-gray-600">${escapeHtml(tasks || "（作業内容なし）")}</div>
+                                </details>
                             </div>
                             <div class="mt-2">
                                 <div class="flex items-center justify-between gap-2">
@@ -2756,6 +2773,7 @@
                 logsContainer.innerHTML = '';
                 logsContainer.appendChild(emptyState);
                 selectedDropboxLogIds.clear();
+                if (rawRecordsCount) rawRecordsCount.textContent = "0件";
                 updateDropboxLogSelectionStatus();
                 updatePreview();
                 return;
@@ -2828,6 +2846,7 @@
                 logsContainer.appendChild(el);
             });
             
+            if (rawRecordsCount) rawRecordsCount.textContent = `${logs.length}件`;
             updateDropboxLogSelectionStatus();
             updatePreview();
         }
@@ -2977,8 +2996,9 @@
             window.open(url, '_blank');
         }
 
-        const STORAGE_KEY = "eri_trip_report_pc_v068";
+        const STORAGE_KEY = "eri_trip_report_pc_v069";
         const LEGACY_STORAGE_KEYS = [
+            "eri_trip_report_pc_v068",
             "eri_trip_report_pc_v067",
             "eri_trip_report_pc_v066",
             "eri_trip_report_pc_v065",
@@ -3146,6 +3166,7 @@
         validateBasicInfo();
         renderLogs();
         renderEvents();
+        if (rawRecordsDetails && events.length) rawRecordsDetails.open = false;
         updatePreview();
 
         handleDropboxRedirect()
