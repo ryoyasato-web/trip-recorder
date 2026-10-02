@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>出張メール・報告ジェネレーター PC v0.6.7 (ERI 総合観測室向け)</title>
+    <title>出張メール・報告ジェネレーター PC v0.6.8 (ERI 総合観測室向け)</title>
     <!-- Tailwind CSS for styling -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- EXIF.js for reading image metadata -->
@@ -34,7 +34,7 @@
 
     <header class="bg-blue-800 text-white p-4 shadow-md flex-shrink-0 flex justify-between items-center">
         <div>
-            <h1 class="text-xl font-bold">出張メール・報告ジェネレーター <span class="text-sm font-normal text-blue-200">PC v0.6.7</span></h1>
+            <h1 class="text-xl font-bold">出張メール・報告ジェネレーター <span class="text-sm font-normal text-blue-200">PC v0.6.8</span></h1>
             <p class="text-xs text-blue-200">現場記録を長期保存し、出張報告まで一元管理</p>
         </div>
         <div class="flex items-center gap-3">
@@ -937,7 +937,10 @@
                 return {
                     id: logIdCounter++,
                     sourceRecordId: Number.isFinite(Number(rec.id)) ? Number(rec.id) : null,
+                    sourceRecordIds: Array.isArray(rec._mergedRecordIds) ? rec._mergedRecordIds : (Number.isFinite(Number(rec.id)) ? [Number(rec.id)] : []),
                     sourceSyncId: rec.uid || null,
+                    sourceSyncIds: Array.isArray(rec._mergedUids) ? rec._mergedUids : [rec.uid].filter(Boolean),
+                    sourceGroupKey: rawRecordPickerKey(rec),
                     time: rec.time || "",
                     location: rec.location || "",
                     lat: rec.lat ?? null,
@@ -1208,11 +1211,122 @@
         }
 
         function recordDateFromRaw(rec){ return parseLogDate(rec?.time||""); }
+
+        function rawRecordHasPhoto(rec){
+            return (Array.isArray(rec?.photos) && rec.photos.length > 0) || Number(rec?.photoCount || 0) > 0;
+        }
+
+        function rawRecordIsBoundary(rec){
+            const actions = Array.isArray(rec?.actions) ? rec.actions : [];
+            return actions.some(a => ["移動開始","作業終了"].includes(String(a||"").trim()));
+        }
+
+        function rawRecordDistanceMeters(a,b){
+            if (![a?.lat,a?.lng,b?.lat,b?.lng].every(v=>Number.isFinite(Number(v)))) return null;
+            return haversineMeters(Number(a.lat),Number(a.lng),Number(b.lat),Number(b.lng));
+        }
+
+        function rawRecordsLikelySameMoment(photoRec, manualRec){
+            const pd = recordDateFromRaw(photoRec), md = recordDateFromRaw(manualRec);
+            if (!pd || !md) return false;
+            const gapSec = (md - pd) / 1000;
+            if (gapSec < 0 || gapSec > 5 * 60) return false;
+            if (rawRecordIsBoundary(manualRec)) return false;
+
+            const pLoc = String(photoRec.location || "").trim();
+            const mLoc = String(manualRec.location || "").trim();
+            if (pLoc && mLoc && pLoc === mLoc) return true;
+
+            const dist = rawRecordDistanceMeters(photoRec, manualRec);
+            if (dist !== null) return dist <= 150;
+
+            // 場所情報が片方または双方にない場合は、誤結合を避けて2分以内だけ結合。
+            return gapSec <= 2 * 60;
+        }
+
+        function mergeRawRecordIntoPhoto(photoRec, manualRec){
+            const out = structuredClone(photoRec);
+            const photoUids = Array.isArray(photoRec._mergedUids) ? photoRec._mergedUids : [photoRec.uid].filter(Boolean);
+            const manualUids = Array.isArray(manualRec._mergedUids) ? manualRec._mergedUids : [manualRec.uid].filter(Boolean);
+            out._mergedUids = [...new Set([...photoUids,...manualUids])];
+            out._mergedRecordIds = [...new Set([
+                ...(Array.isArray(photoRec._mergedRecordIds) ? photoRec._mergedRecordIds : [photoRec.id]),
+                ...(Array.isArray(manualRec._mergedRecordIds) ? manualRec._mergedRecordIds : [manualRec.id])
+            ].filter(v=>v!==undefined&&v!==null))];
+
+            out.actions = [...new Set([
+                ...(Array.isArray(photoRec.actions) ? photoRec.actions : []),
+                ...(Array.isArray(manualRec.actions) ? manualRec.actions : [])
+            ].map(v=>String(v||"").trim()).filter(Boolean))];
+
+            const notes = [photoRec.note,manualRec.note].map(v=>String(v||"").trim()).filter(Boolean);
+            out.note = [...new Set(notes)].join(" / ");
+
+            const photos = [
+                ...(Array.isArray(photoRec.photos) ? photoRec.photos : []),
+                ...(Array.isArray(manualRec.photos) ? manualRec.photos : [])
+            ];
+            out.photos = photos;
+            out.photoCount = photos.length || Number(photoRec.photoCount || 0) + Number(manualRec.photoCount || 0);
+            out.photoNames = photos.length ? photos.map(p=>p?.name||"").filter(Boolean) : [
+                ...(Array.isArray(photoRec.photoNames)?photoRec.photoNames:[]),
+                ...(Array.isArray(manualRec.photoNames)?manualRec.photoNames:[])
+            ];
+
+            if (!out.location && manualRec.location) out.location = manualRec.location;
+            if (!Number.isFinite(Number(out.lat)) && Number.isFinite(Number(manualRec.lat))) out.lat = manualRec.lat;
+            if (!Number.isFinite(Number(out.lng)) && Number.isFinite(Number(manualRec.lng))) out.lng = manualRec.lng;
+            if (!out.gpsAccuracy && manualRec.gpsAccuracy) out.gpsAccuracy = manualRec.gpsAccuracy;
+
+            // 時刻は写真撮影時刻を優先。メモ送信時刻は候補一覧には出さない。
+            const photoTimes = photos.map(p=>p?.takenAt).filter(Boolean).sort();
+            if (photoTimes.length) out.time = photoTimes[0];
+            out._mergedManualTime = manualRec.time || "";
+            out.kind = "mixed";
+            return out;
+        }
+
+        function consolidateRawRecordsForPicker(records){
+            const sorted = (Array.isArray(records)?records:[])
+                .map(r=>structuredClone(r))
+                .sort((a,b)=>String(a.time||"").localeCompare(String(b.time||"")));
+
+            const result = [];
+            for (const rec of sorted){
+                if (rawRecordHasPhoto(rec)){
+                    if (!Array.isArray(rec._mergedUids)) rec._mergedUids = [rec.uid].filter(Boolean);
+                    if (!Array.isArray(rec._mergedRecordIds)) rec._mergedRecordIds = [rec.id].filter(v=>v!==undefined&&v!==null);
+                    result.push(rec);
+                    continue;
+                }
+
+                let merged = false;
+                for (let i=result.length-1;i>=0;i--){
+                    const candidate = result[i];
+                    const cd = recordDateFromRaw(candidate), rd = recordDateFromRaw(rec);
+                    if (cd && rd && (rd-cd) > 5*60*1000) break;
+                    if (rawRecordHasPhoto(candidate) && rawRecordsLikelySameMoment(candidate,rec)){
+                        result[i] = mergeRawRecordIntoPhoto(candidate,rec);
+                        merged = true;
+                        break;
+                    }
+                }
+                if (!merged){
+                    if (!Array.isArray(rec._mergedUids)) rec._mergedUids = [rec.uid].filter(Boolean);
+                    if (!Array.isArray(rec._mergedRecordIds)) rec._mergedRecordIds = [rec.id].filter(v=>v!==undefined&&v!==null);
+                    result.push(rec);
+                }
+            }
+            return result;
+        }
+
         function rawRecordPickerKey(rec,index=0){
+            const merged = Array.isArray(rec?._mergedUids) ? rec._mergedUids.filter(Boolean) : [];
+            if (merged.length) return merged.map(String).sort().join("+");
             return String(rec?.uid||rec?.createdAt||`${rec?.time||"unknown"}#${rec?.id??index}`);
         }
         function importedDropboxKeys(){
-            return new Set(logs.filter(l=>l.sourceType==="dropbox").map(l=>String(l.sourceSyncId||l.time||l.id)));
+            return new Set(logs.filter(l=>l.sourceType==="dropbox").map(l=>String(l.sourceGroupKey||l.sourceSyncId||l.time||l.id)));
         }
         function rawRecordInPendingRange(rec){
             if(!pendingDropboxRange) return true;
@@ -1220,7 +1334,7 @@
             return Boolean(d&&d>=pendingDropboxRange.start&&d<=pendingDropboxRange.end);
         }
         function openDropboxRecordPicker(records){
-            pendingDropboxRecords=Array.isArray(records)?structuredClone(records):[];
+            pendingDropboxRecords=consolidateRawRecordsForPicker(records);
             pendingDropboxRange=parseScheduleDateRange(basicFieldValue("日程"));
             if(dropboxPickerShowOutside) dropboxPickerShowOutside.checked=false;
             renderDropboxRecordPicker();
@@ -1255,6 +1369,8 @@
                 const defaultChecked=isImported || (inRange&&!excludedDropboxSyncIds.has(key));
                 const actions=Array.isArray(rec.actions)?rec.actions.join(" / "):"";
                 const photos=Array.isArray(rec.photos)?rec.photos.length:(Number(rec.photoCount)||0);
+                const mergedCount=Array.isArray(rec._mergedUids)?rec._mergedUids.length:1;
+                const mergedPhotoMemo=mergedCount>1 && rawRecordHasPhoto(rec);
                 const label=document.createElement("label");
                 label.className=`block border rounded-lg p-3 ${isImported?"bg-blue-50 border-blue-200":"cursor-pointer hover:border-blue-400 "+(inRange?"bg-white":"bg-amber-50 border-amber-200")}`;
                 label.innerHTML=`
@@ -1264,6 +1380,7 @@
                             <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
                                 <span class="font-mono text-sm font-bold">${escapeHtml(rec.time||"時刻不明")}</span>
                                 ${isImported?'<span class="text-[10px] bg-blue-100 text-blue-800 px-2 py-0.5 rounded font-bold">取込済み</span>':""}
+                                ${mergedPhotoMemo?'<span class="text-[10px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded font-bold">写真＋メモを統合</span>':""}
                                 ${!inRange?'<span class="text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded">日程範囲外</span>':""}
                                 ${photos?`<span class="text-xs text-blue-700">📷 ${photos}枚</span>`:""}
                             </div>
@@ -1374,7 +1491,8 @@
                 const eventIds = new Set(events.flatMap(e => e.sourceLogIds || []));
                 const sourceSyncIds = new Set(
                     logs.filter(l => eventIds.has(l.id) && l.sourceType === "dropbox")
-                        .map(l => l.sourceSyncId).filter(Boolean)
+                        .flatMap(l => Array.isArray(l.sourceSyncIds) && l.sourceSyncIds.length ? l.sourceSyncIds : [l.sourceSyncId])
+                        .filter(Boolean)
                 );
                 if (sourceSyncIds.size) return currentDropboxRawRecords.filter(r => sourceSyncIds.has(r.uid));
                 return structuredClone(currentDropboxRawRecords);
@@ -2544,7 +2662,7 @@
         }
 
         function dropboxLogExclusionKey(log) {
-            return String(log?.sourceSyncId || log?.time || log?.id || "");
+            return String(log?.sourceGroupKey || log?.sourceSyncId || log?.time || log?.id || "");
         }
 
         function toggleDropboxLogSelection(id, checked) {
@@ -2859,8 +2977,9 @@
             window.open(url, '_blank');
         }
 
-        const STORAGE_KEY = "eri_trip_report_pc_v067";
+        const STORAGE_KEY = "eri_trip_report_pc_v068";
         const LEGACY_STORAGE_KEYS = [
+            "eri_trip_report_pc_v067",
             "eri_trip_report_pc_v066",
             "eri_trip_report_pc_v065",
             "eri_trip_report_pc_v064",
