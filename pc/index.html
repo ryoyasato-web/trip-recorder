@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>出張メール・報告ジェネレーター PC v0.6.3 (ERI 総合観測室向け)</title>
+    <title>出張メール・報告ジェネレーター PC v0.6.4 (ERI 総合観測室向け)</title>
     <!-- Tailwind CSS for styling -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- EXIF.js for reading image metadata -->
@@ -34,7 +34,7 @@
 
     <header class="bg-blue-800 text-white p-4 shadow-md flex-shrink-0 flex justify-between items-center">
         <div>
-            <h1 class="text-xl font-bold">出張メール・報告ジェネレーター <span class="text-sm font-normal text-blue-200">PC v0.6.3</span></h1>
+            <h1 class="text-xl font-bold">出張メール・報告ジェネレーター <span class="text-sm font-normal text-blue-200">PC v0.6.4</span></h1>
             <p class="text-xs text-blue-200">現場記録を長期保存し、出張報告まで一元管理</p>
         </div>
         <div class="flex items-center gap-3">
@@ -265,33 +265,40 @@
                 </div>
             </section>
 
-            <section class="flex-1 flex flex-col min-h-[300px]">
-                <div class="border-b pb-3 mb-3">
-                    <div class="flex flex-wrap justify-between items-center gap-2">
-                        <h2 class="text-lg font-bold text-gray-700">7. 元ログ（確認・修正）</h2>
-                        <button onclick="addManualLog()" class="text-xs bg-gray-200 hover:bg-gray-300 text-gray-700 px-3 py-1 rounded shadow flex items-center gap-1">
-                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
-                            手動で追加
-                        </button>
-                    </div>
-                    <div id="dropbox-log-tools" class="hidden mt-3 rounded-lg border border-amber-200 bg-amber-50 p-3">
-                        <div class="text-xs font-bold text-amber-900 mb-2">Dropboxから取り込んだ記録の整理</div>
-                        <div class="flex flex-wrap gap-2 items-center">
-                            <button onclick="setAllDropboxLogSelection(true)" class="text-xs bg-white border rounded px-3 py-2 hover:bg-gray-50">Dropbox記録を全選択</button>
-                            <button onclick="setAllDropboxLogSelection(false)" class="text-xs bg-white border rounded px-3 py-2 hover:bg-gray-50">選択解除</button>
-                            <button onclick="excludeSelectedDropboxLogs()" class="text-xs bg-red-600 hover:bg-red-700 text-white rounded px-3 py-2 font-bold">選択した記録を報告から外す</button>
-                            <button onclick="clearAllDropboxImportedLogs()" class="text-xs bg-white border border-red-300 text-red-700 hover:bg-red-50 rounded px-3 py-2 font-bold">Dropbox取り込み分を全部外す</button>
-                            <button onclick="pullDropboxRecords(true)" class="text-xs bg-blue-50 border border-blue-200 text-blue-700 hover:bg-blue-100 rounded px-3 py-2">取り込みを選び直す</button>
+            <section class="flex-1 flex flex-col min-h-[300px] rounded-xl border border-gray-200 bg-gray-50/70 p-4 mb-4">
+                <div class="flex flex-col gap-3 mb-4">
+                    <div class="flex flex-wrap justify-between items-start gap-3">
+                        <div>
+                            <h2 class="text-lg font-bold text-gray-800">7. 現場記録の確認・整理</h2>
+                            <p class="text-[11px] text-gray-500 mt-1">
+                                取り込んだ記録を確認し、報告に使わないものだけ外せます。ここで外してもDropboxの保存記録は消えません。
+                            </p>
                         </div>
-                        <div id="dropbox-log-selection-status" class="text-[11px] text-amber-800 mt-2"></div>
-                        <div class="text-[10px] text-gray-500 mt-1">ここで外しても長期アーカイブ上の元記録は削除されません。</div>
+                        <div class="flex flex-wrap gap-2">
+                            <button onclick="pullDropboxRecords(true)" class="text-xs bg-blue-700 hover:bg-blue-800 text-white px-3 py-2 rounded-lg font-bold shadow-sm">
+                                ＋ Dropboxから追加
+                            </button>
+                            <button onclick="addManualLog()" class="text-xs bg-white hover:bg-gray-50 text-gray-700 border border-gray-300 px-3 py-2 rounded-lg font-bold">
+                                ＋ 手動で追加
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="dropbox-log-tools" class="hidden rounded-lg border border-gray-200 bg-white p-3">
+                        <div class="flex flex-wrap gap-2 items-center">
+                            <span id="dropbox-log-selection-status" class="text-xs font-bold text-gray-700 mr-1"></span>
+                            <button onclick="setAllDropboxLogSelection(true)" class="text-xs bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 hover:bg-gray-100">全選択</button>
+                            <button onclick="setAllDropboxLogSelection(false)" class="text-xs bg-gray-50 border border-gray-200 rounded-lg px-3 py-1.5 hover:bg-gray-100">選択解除</button>
+                            <button onclick="excludeSelectedDropboxLogs()" class="text-xs bg-red-50 border border-red-200 text-red-700 hover:bg-red-100 rounded-lg px-3 py-1.5 font-bold">選択した記録を外す</button>
+                            <button onclick="clearAllDropboxImportedLogs()" class="text-xs bg-white border border-red-200 text-red-600 hover:bg-red-50 rounded-lg px-3 py-1.5">Dropbox分を全部外す</button>
+                        </div>
                     </div>
                 </div>
                 
                 <div id="logs-container" class="space-y-3 flex-1">
                     <!-- ログアイテムがここに動的に生成されます -->
-                    <div id="empty-state" class="text-center text-gray-400 py-10 text-sm">
-                        写真を追加するか、「手動で追加」ボタンから記録を開始してください。
+                    <div id="empty-state" class="text-center text-gray-400 py-10 text-sm rounded-lg border border-dashed border-gray-300 bg-white">
+                        まだ現場記録がありません。「Dropboxから追加」または「手動で追加」から記録を追加してください。
                     </div>
                 </div>
             </section>
@@ -1189,6 +1196,9 @@
         function rawRecordPickerKey(rec,index=0){
             return String(rec?.uid||rec?.createdAt||`${rec?.time||"unknown"}#${rec?.id??index}`);
         }
+        function importedDropboxKeys(){
+            return new Set(logs.filter(l=>l.sourceType==="dropbox").map(l=>String(l.sourceSyncId||l.time||l.id)));
+        }
         function rawRecordInPendingRange(rec){
             if(!pendingDropboxRange) return true;
             const d=recordDateFromRaw(rec);
@@ -1223,19 +1233,22 @@
                 return;
             }
 
+            const alreadyImported = importedDropboxKeys();
             rows.forEach(({rec,index,inRange})=>{
                 const key=rawRecordPickerKey(rec,index);
-                const defaultChecked=inRange&&!excludedDropboxSyncIds.has(key);
+                const isImported=alreadyImported.has(key);
+                const defaultChecked=isImported || (inRange&&!excludedDropboxSyncIds.has(key));
                 const actions=Array.isArray(rec.actions)?rec.actions.join(" / "):"";
                 const photos=Array.isArray(rec.photos)?rec.photos.length:(Number(rec.photoCount)||0);
                 const label=document.createElement("label");
-                label.className=`block border rounded-lg p-3 cursor-pointer hover:border-blue-400 ${inRange?"bg-white":"bg-amber-50 border-amber-200"}`;
+                label.className=`block border rounded-lg p-3 ${isImported?"bg-blue-50 border-blue-200":"cursor-pointer hover:border-blue-400 "+(inRange?"bg-white":"bg-amber-50 border-amber-200")}`;
                 label.innerHTML=`
                     <div class="flex items-start gap-3">
-                        <input type="checkbox" class="dropbox-picker-checkbox mt-1" data-key="${escapeHtml(key)}" ${defaultChecked?"checked":""}>
+                        <input type="checkbox" class="dropbox-picker-checkbox mt-1" data-key="${escapeHtml(key)}" ${defaultChecked?"checked":""} ${isImported?"disabled":""}>
                         <div class="flex-1 min-w-0">
                             <div class="flex flex-wrap items-center gap-x-3 gap-y-1">
                                 <span class="font-mono text-sm font-bold">${escapeHtml(rec.time||"時刻不明")}</span>
+                                ${isImported?'<span class="text-[10px] bg-blue-100 text-blue-800 px-2 py-0.5 rounded font-bold">取込済み</span>':""}
                                 ${!inRange?'<span class="text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded">日程範囲外</span>':""}
                                 ${photos?`<span class="text-xs text-blue-700">📷 ${photos}枚</span>`:""}
                             </div>
@@ -1256,31 +1269,42 @@
             dropboxPickerSummary.textContent=`表示 ${visible.length}件 / 選択 ${selected}件 / 日程範囲内 ${inRangeTotal}件`;
         }
         function setAllDropboxPicker(checked){
-            dropboxPickerList.querySelectorAll(".dropbox-picker-checkbox").forEach(cb=>cb.checked=checked);
+            dropboxPickerList.querySelectorAll(".dropbox-picker-checkbox").forEach(cb=>{ if(!cb.disabled) cb.checked=checked; });
             updateDropboxPickerSummary();
         }
         function applyDropboxRecordSelection(){
-            const checkboxMap=new Map([...dropboxPickerList.querySelectorAll(".dropbox-picker-checkbox")].map(cb=>[cb.dataset.key,cb.checked]));
-            checkboxMap.forEach((checked,key)=>checked?excludedDropboxSyncIds.delete(key):excludedDropboxSyncIds.add(key));
+            const checkboxMap=new Map(
+                [...dropboxPickerList.querySelectorAll(".dropbox-picker-checkbox")]
+                    .filter(cb=>!cb.disabled)
+                    .map(cb=>[cb.dataset.key,cb.checked])
+            );
 
-            const selectedRecords=pendingDropboxRecords.filter((rec,index)=>{
+            const existingKeys=importedDropboxKeys();
+            const recordsToAdd=pendingDropboxRecords.filter((rec,index)=>{
                 const key=rawRecordPickerKey(rec,index);
-                return checkboxMap.has(key)?checkboxMap.get(key):false;
+                return !existingKeys.has(key) && checkboxMap.get(key)===true;
             });
 
-            const imported=fieldRecordsToLogs({records:selectedRecords},"dropbox");
+            // 今回明示的に追加したものは、以前の除外指定があれば解除する。
+            recordsToAdd.forEach((rec,index)=>{
+                excludedDropboxSyncIds.delete(rawRecordPickerKey(rec,index));
+            });
+
+            const imported=fieldRecordsToLogs({records:recordsToAdd},"dropbox");
             selectedDropboxLogIds.clear();
-            logs=logs.filter(l=>l.sourceType!=="dropbox");
             logs.push(...imported);
             sortLogs();
             renderLogs();
             buildEventsFromLogs(false);
             saveDraft();
 
+            const totalDropbox=logs.filter(l=>l.sourceType==="dropbox").length;
             const photoTotal=imported.reduce((sum,r)=>sum+(Number(r.photoCount)||0),0);
             const stamp=new Date().toLocaleString("ja-JP");
-            setDropboxStatus(`反映済み：${stamp} / ${imported.length}件${photoTotal?` / 写真記録 ${photoTotal}枚`:""}`,"ok");
-            fieldPackageStatus.textContent=`Dropboxから選択した ${imported.length}件を反映しました。`;
+            setDropboxStatus(`反映済み：${stamp} / 今回追加 ${imported.length}件 / 取込済み計 ${totalDropbox}件${photoTotal?` / 今回の写真 ${photoTotal}枚`:""}`,"ok");
+            fieldPackageStatus.textContent=imported.length
+                ? `Dropboxから ${imported.length}件を追加しました。既に取り込んでいた記録はそのまま残っています。`
+                : "新しく追加された記録はありません。既存の取り込み記録はそのまま残っています。";
             fieldPackageStatus.className="text-xs text-green-600 mt-2";
             closeDropboxRecordPicker();
         }
@@ -2525,7 +2549,7 @@
             if (!dropboxLogSelectionStatus) return;
             const importedCount = logs.filter(l => l.sourceType === "dropbox").length;
             const selectedCount = [...selectedDropboxLogIds].filter(id => logs.some(l => Number(l.id) === Number(id) && l.sourceType === "dropbox")).length;
-            dropboxLogSelectionStatus.textContent = `Dropbox取り込み ${importedCount}件 / 選択 ${selectedCount}件`;
+            dropboxLogSelectionStatus.textContent = `Dropbox記録 ${importedCount}件　選択 ${selectedCount}件`;
             if (dropboxLogTools) {
                 dropboxLogTools.classList.toggle("hidden", importedCount === 0);
             }
@@ -2609,7 +2633,7 @@
 
             logs.forEach(log => {
                 const el = document.createElement('div');
-                el.className = 'bg-white border rounded-lg p-3 shadow-sm relative group hover:border-blue-300 transition-colors';
+                el.className = 'bg-white border border-gray-200 rounded-xl p-4 shadow-sm relative group hover:border-blue-300 transition-colors';
                 
                 // 地図リンクの生成 (GPSがある場合)
                 let mapLinkHTML = '';
@@ -2634,7 +2658,7 @@
                 el.innerHTML = `
                     ${isDropboxLog ? `<label class="absolute top-3 left-3 z-10 flex items-center gap-1 text-[11px] font-bold text-blue-700 bg-blue-50 border border-blue-200 rounded px-2 py-1 cursor-pointer">
                         <input type="checkbox" ${isSelected ? "checked" : ""} onchange="toggleDropboxLogSelection(${log.id}, this.checked)">
-                        選択
+                        報告から外す候補
                     </label>` : ""}
                     <button onclick="removeLog(${log.id})" class="absolute top-2 right-2 text-gray-300 hover:text-red-500 transition-colors" title="${isDropboxLog ? "報告から外す" : "削除"}">
                         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
@@ -2656,7 +2680,8 @@
                             <label class="text-xs text-gray-500">作業内容</label>
                             <textarea oninput="updateLog(${log.id}, 'task', this.value)" placeholder="（例：◯◯観測点にてバッテリー交換、データ回収）" class="w-full h-full min-h-[60px] p-2 text-sm border rounded bg-gray-50 focus:bg-white focus:ring-1 focus:ring-blue-400 outline-none resize-y">${escapeHtml(log.task)}</textarea>
                             ${log.sourceFile ? `<div class="text-[10px] text-gray-400 mt-1">元画像: ${escapeHtml(log.sourceFile)}</div>` : ""}
-                            ${log.sourceType ? `<div class="text-[10px] text-gray-400 mt-1">情報源: ${escapeHtml(log.sourceType)}</div>` : ""}
+                            ${log.sourceType === "dropbox" ? '<div class="text-[10px] text-blue-500 mt-1">Dropboxから取り込み</div>' :
+  log.sourceType ? `<div class="text-[10px] text-gray-400 mt-1">情報源: ${escapeHtml(log.sourceType)}</div>` : ""}
                             ${isDropboxLog ? `<button onclick="removeLog(${log.id})" class="mt-2 text-xs text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 rounded px-3 py-1.5 font-bold">この記録を報告から外す</button>` : ""}
                         </div>
                     </div>
@@ -2813,8 +2838,9 @@
             window.open(url, '_blank');
         }
 
-        const STORAGE_KEY = "eri_trip_report_pc_v063";
+        const STORAGE_KEY = "eri_trip_report_pc_v064";
         const LEGACY_STORAGE_KEYS = [
+            "eri_trip_report_pc_v063",
             "eri_trip_report_pc_v062",
             "eri_trip_report_pc_v06",
             "eri_trip_report_pc_v05",
