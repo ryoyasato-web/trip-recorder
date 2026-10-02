@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>出張メール・報告ジェネレーター PC v0.6.12 (ERI 総合観測室向け)</title>
+    <title>出張メール・報告ジェネレーター PC v0.6.13 (ERI 総合観測室向け)</title>
     <!-- Tailwind CSS for styling -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- EXIF.js for reading image metadata -->
@@ -34,7 +34,7 @@
 
     <header class="bg-blue-800 text-white p-4 shadow-md flex-shrink-0 flex justify-between items-center">
         <div>
-            <h1 class="text-xl font-bold">出張メール・報告ジェネレーター <span class="text-sm font-normal text-blue-200">PC v0.6.12</span></h1>
+            <h1 class="text-xl font-bold">出張メール・報告ジェネレーター <span class="text-sm font-normal text-blue-200">PC v0.6.13</span></h1>
             <p class="text-xs text-blue-200">現場記録を長期保存し、出張報告まで一元管理</p>
         </div>
         <div class="flex items-center gap-3">
@@ -199,9 +199,9 @@
                                 <div class="grid grid-cols-1 lg:grid-cols-3 gap-3">
                                     <div class="border rounded-lg p-3 bg-amber-50">
                                         <div class="font-bold text-sm text-amber-800 mb-1">メモ</div>
-                                        <p class="text-[11px] text-gray-600 mb-2">時刻付きメモを、場所・標準作業・自由メモに自動整形して現場記録へ追加します。</p>
+                                        <p class="text-[11px] text-gray-600 mb-2">「10/02 1111」のような日時、次行の「オフィスにて」のような場所、作業内容を自動で分離して現場記録へ追加します。</p>
                                         <textarea id="memo-input" rows="5" class="w-full p-2 text-sm border rounded bg-white"
-                                            placeholder="例：&#10;9/24 09:30 ABC観測点着&#10;10:00 バッテリー交換、SD回収&#10;10:15 UDだけ応答がおかしい"></textarea>
+                                            placeholder="例：&#10;10/02 1111&#10;オフィスにて&#10;プレート境界を追加"></textarea>
                                         <button onclick="importMemo()" class="mt-2 w-full text-xs bg-amber-600 hover:bg-amber-700 text-white px-3 py-2 rounded-lg">メモから記録生成</button>
                                     </div>
 
@@ -2007,7 +2007,8 @@
             } else if (mainActions.length) {
                 first = `${joinJapaneseClauses(mainActions)}。`;
             } else if (notes.length) {
-                first = "作業記録を行った。";
+                // 自由メモそのものが作業内容なので、意味のない「作業記録を行った」は付けない。
+                first = "";
             }
 
             const noteSentences = notes.map(ensurePeriod).join("");
@@ -2419,8 +2420,20 @@
             let text = String(rawTask || "").trim();
             let location = "";
 
+            // 「オフィスにて」のような場所だけの行は、作業内容ではなく場所として扱う。
+            let m = text.match(/^(.{1,60}?)\s*にて\s*$/);
+            if (m && m[1].trim()) {
+                return { location:m[1].trim(), task:"", normalized:true };
+            }
+
+            // 「場所：オフィス」「場所 オフィス」のような明示指定にも対応。
+            m = text.match(/^場所\s*[：:]?\s*(.{1,60})$/);
+            if (m && m[1].trim()) {
+                return { location:m[1].trim(), task:"", normalized:true };
+            }
+
             // 「ABC観測点着」「ABC観測点 到着」「ABC観測点：バッテリー交換」等から場所を分離。
-            let m = text.match(/^(.{1,60}?(?:観測点|観測局|観測所|局))\s*(?:に|へ)?\s*(?:到着|着)\s*$/);
+            m = text.match(/^(.{1,60}?(?:観測点|観測局|観測所|局))\s*(?:に|へ)?\s*(?:到着|着)\s*$/);
             if (m) {
                 return { location:m[1].trim(), task:"観測点到着", normalized:true };
             }
@@ -2482,17 +2495,30 @@
                 let time = "";
                 let m;
 
-                m = line.match(/^(?:(20\d{2})[\/\-年])?(\d{1,2})[\/\-月](\d{1,2})日?\s+(\d{1,2}):(\d{2})\s*(.*)$/);
+                // 10/02 11:11 / 10/02 1111 / 2026/10/02 1111 の両方を読む。
+                m = line.match(/^(?:(20\d{2})[\/\-年])?(\d{1,2})[\/\-月](\d{1,2})日?\s+(?:(\d{1,2}):(\d{2})|(\d{3,4}))\s*(.*)$/);
                 if (m) {
-                    const y = m[1] || new Date().getFullYear();
-                    currentDate = `${y}/${String(m[2]).padStart(2,'0')}/${String(m[3]).padStart(2,'0')}`;
-                    time = `${currentDate} ${String(m[4]).padStart(2,'0')}:${m[5]}`;
-                    task = m[6] || "";
+                    const currentYear = String(currentDate || "").match(/^(20\d{2})\//)?.[1] || String(new Date().getFullYear());
+                    const y = m[1] || currentYear;
+                    const compact = m[6] || "";
+                    const hh = m[4] !== undefined ? Number(m[4]) : Number(compact.slice(0, compact.length - 2));
+                    const mm = m[5] !== undefined ? Number(m[5]) : Number(compact.slice(-2));
+                    if (hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59) {
+                        currentDate = `${y}/${String(m[2]).padStart(2,'0')}/${String(m[3]).padStart(2,'0')}`;
+                        time = `${currentDate} ${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}`;
+                        task = m[7] || "";
+                    }
                 } else {
-                    m = line.match(/^(\d{1,2}):(\d{2})\s*(.*)$/);
+                    // 11:11 / 1111 の時刻だけの行にも対応。
+                    m = line.match(/^(?:(\d{1,2}):(\d{2})|(\d{3,4}))\s*(.*)$/);
                     if (m) {
-                        time = `${currentDate} ${String(m[1]).padStart(2,'0')}:${m[2]}`;
-                        task = m[3] || "";
+                        const compact = m[3] || "";
+                        const hh = m[1] !== undefined ? Number(m[1]) : Number(compact.slice(0, compact.length - 2));
+                        const mm = m[2] !== undefined ? Number(m[2]) : Number(compact.slice(-2));
+                        if (hh >= 0 && hh <= 23 && mm >= 0 && mm <= 59) {
+                            time = `${currentDate} ${String(hh).padStart(2,'0')}:${String(mm).padStart(2,'0')}`;
+                            task = m[4] || "";
+                        }
                     }
                 }
 
@@ -3134,8 +3160,9 @@
             window.open(url, '_blank');
         }
 
-        const STORAGE_KEY = "eri_trip_report_pc_v0612";
+        const STORAGE_KEY = "eri_trip_report_pc_v0613";
         const LEGACY_STORAGE_KEYS = [
+            "eri_trip_report_pc_v0612",
             "eri_trip_report_pc_v0611",
             "eri_trip_report_pc_v0610",
             "eri_trip_report_pc_v069",
