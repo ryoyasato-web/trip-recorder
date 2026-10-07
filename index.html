@@ -71,6 +71,13 @@ input:focus,textarea:focus{border-color:#60a5fa;box-shadow:0 0 0 3px #dbeafe}
 
 .camera-button{display:block;width:100%;border:0;border-radius:18px;padding:24px 14px;background:#1d4ed8;color:white;font-size:21px;font-weight:850;text-align:center;cursor:pointer;box-shadow:0 7px 18px #1d4ed833}.camera-button:active{background:#1e40af}.manual-button{width:100%;border:0;border-radius:14px;background:#0f766e;color:white;padding:13px;font-weight:800;margin-top:10px}.log.photo-only{border-left:4px solid #2563eb}.log.mixed{border-left:4px solid #7c3aed}.badge{display:inline-block;border-radius:999px;padding:3px 7px;font-size:10px;font-weight:700;margin-left:5px}.badge-photo{background:#dbeafe;color:#1d4ed8}.badge-mixed{background:#ede9fe;color:#6d28d9}.photo-times{font-size:12px;color:#1d4ed8;margin-top:6px;line-height:1.5}.log-actions{display:flex;gap:6px;margin-top:8px}.mini{border:1px solid #d1d5db;background:white;border-radius:8px;padding:6px 9px;font-size:12px;color:#374151}.toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);z-index:80;background:#111827;color:white;border-radius:999px;padding:10px 15px;font-size:13px;display:none;box-shadow:0 6px 20px #0004}.toast.show{display:block}
 @media(min-width:700px){.sheet{border-radius:20px;margin-bottom:20px}.sheet-bg{align-items:center}}
+
+.gallery-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.gallery-item{min-width:0;border:1px solid var(--line);border-radius:12px;padding:8px}
+.gallery-preview{display:block;width:100%;padding:0;border:0;background:#f3f4f6;border-radius:8px;overflow:hidden;cursor:pointer}
+.gallery-preview img{display:block;width:100%;height:160px;object-fit:cover;margin:0;border-radius:0}
+.gallery-item .meta{overflow-wrap:anywhere}
+.gallery-item .secondary{width:100%;margin-top:8px}
 </style>
 </head>
 <body>
@@ -94,6 +101,8 @@ input:focus,textarea:focus{border-color:#60a5fa;box-shadow:0 0 0 3px #dbeafe}
     <span>ホーム画面に追加するとアプリとして使えます。</span>
     <button class="secondary" onclick="installApp()">追加</button>
   </div>
+
+  <button class="sheet-btn" style="margin:0 0 10px;text-align:center;color:#1d4ed8" onclick="openPhotoGallery()">🖼 写真一覧を見る</button>
 
   <section class="card" style="background:linear-gradient(180deg,#eff6ff,#fff)">
     <label class="camera-button">
@@ -211,6 +220,15 @@ input:focus,textarea:focus{border-color:#60a5fa;box-shadow:0 0 0 3px #dbeafe}
     
     <button class="sheet-btn danger" onclick="clearAllData()">全記録を消去</button>
     <div class="meta">PC用データには写真本体を含めず、撮影時刻・枚数・ファイル名だけを含めます。写真本体は端末内に保持します。</div>
+  </div>
+</div>
+
+
+<div id="photo-gallery" class="modal" onclick="if(event.target===this)closePhotoGallery()">
+  <div class="modal-card" role="dialog" aria-modal="true" aria-label="写真一覧">
+    <div class="sheet-title"><span>写真一覧 <span id="gallery-count" class="meta"></span></span><button class="ghost" aria-label="写真一覧を閉じる" onclick="closePhotoGallery()">✕</button></div>
+    <p class="meta">この端末の写真を新しい順に表示します。写真をタップすると拡大できます。</p>
+    <div id="photo-gallery-content" class="gallery-grid"></div>
   </div>
 </div>
 
@@ -415,6 +433,72 @@ function closePhotoModal(){
   photoModalContent.querySelectorAll("[data-url]").forEach(x=>URL.revokeObjectURL(x.dataset.url));
   photoModalContent.innerHTML="";photoModal.classList.remove("open");
 }
+
+
+let gallerySession=0;
+function galleryPhotoTime(row,record){
+  const meta=(record.photos||[]).find(p=>p.name===row.name);
+  return String(meta?.takenAt||record.time||record.createdAt||"");
+}
+async function allGalleryPhotos(){
+  const db=await openDB();
+  try{
+    const rows=await new Promise((resolve,reject)=>{
+      const request=db.transaction(STORE,"readonly").objectStore(STORE).getAll();
+      request.onsuccess=()=>resolve(request.result||[]);
+      request.onerror=()=>reject(request.error);
+    });
+    const byId=new Map(records.map(record=>[record.id,record]));
+    return rows.filter(row=>byId.has(row.recordId)&&row.blob)
+      .map(row=>({row,record:byId.get(row.recordId),time:galleryPhotoTime(row,byId.get(row.recordId))}))
+      .sort((a,b)=>b.time.localeCompare(a.time)||String(b.row.id).localeCompare(String(a.row.id),undefined,{numeric:true}));
+  }finally{db.close()}
+}
+async function openPhotoGallery(){
+  closePhotoGallery();
+  const session=gallerySession,content=$("photo-gallery-content");
+  $("photo-gallery").classList.add("open");content.textContent="写真を読み込み中…";
+  try{
+    const items=await allGalleryPhotos();
+    if(session!==gallerySession)return;
+    content.innerHTML="";$("gallery-count").textContent=`${items.length}枚`;
+    if(!items.length){content.textContent="この端末に保存された写真はありません。";return}
+    items.forEach(({row,record,time},index)=>{
+      const card=document.createElement("div"),url=URL.createObjectURL(row.blob);
+      card.className="gallery-item";card.dataset.url=url;
+      const preview=document.createElement("button");preview.className="gallery-preview";
+      preview.setAttribute("aria-label",`${row.name||"写真"}を拡大`);
+      const img=document.createElement("img");img.src=url;img.alt=row.name||"記録写真";img.loading="lazy";img.decoding="async";
+      preview.appendChild(img);preview.onclick=()=>showGalleryPhoto(row,index);
+      const meta=document.createElement("div");meta.className="meta";meta.textContent=[time,record.location,row.name].filter(Boolean).join(" / ");
+      const save=document.createElement("button");save.className="secondary";save.textContent="端末に保存";save.onclick=()=>savePhotoToDevice(row,index);
+      card.append(preview,meta,save);content.appendChild(card);
+    });
+  }catch(e){
+    if(session!==gallerySession)return;
+    console.error(e);content.textContent="写真一覧を読み込めませんでした。もう一度開いてください。";
+  }
+}
+function showGalleryPhoto(row,index){
+  closePhotoModal();
+  const wrap=document.createElement("div"),url=URL.createObjectURL(row.blob);
+  wrap.dataset.url=url;
+  const img=document.createElement("img");img.src=url;img.alt=row.name||"記録写真";
+  const meta=document.createElement("p");meta.className="meta";meta.textContent=row.name||"写真";
+  const save=document.createElement("button");save.className="secondary";save.textContent="端末に保存";save.onclick=()=>savePhotoToDevice(row,index);
+  wrap.append(img,meta,save);photoModalContent.appendChild(wrap);photoModal.classList.add("open");
+}
+function closePhotoGallery(){
+  gallerySession++;
+  const content=$("photo-gallery-content");
+  content.querySelectorAll("[data-url]").forEach(card=>URL.revokeObjectURL(card.dataset.url));
+  content.innerHTML="";$("gallery-count").textContent="";$("photo-gallery").classList.remove("open");
+}
+document.addEventListener("keydown",event=>{
+  if(event.key!=="Escape")return;
+  if(photoModal.classList.contains("open"))closePhotoModal();
+  else if($("photo-gallery").classList.contains("open"))closePhotoGallery();
+});
 
 function toast(msg){const el=document.getElementById("toast");if(!el)return;el.textContent=msg;el.classList.add("show");clearTimeout(toast._t);toast._t=setTimeout(()=>el.classList.remove("show"),1800)}
 function openDataMenu(){dataMenu.classList.add("open")}
