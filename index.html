@@ -345,8 +345,76 @@ function renderEditPhotoMeta(rec){const ps=Array.isArray(rec.photos)?rec.photos:
 function saveEdit(){const rec=records.find(r=>r.id===editingId);if(!rec)return;rec.note=editNote.value.trim();rec.location=editLocation.value.trim();rec.kind=recordKind(rec);rec.updatedAt=new Date().toISOString();save();markDropboxDirty();renderRecords();closeEdit();scheduleDropboxSync()}
 editPhotoInput.addEventListener("change",async e=>{const rec=records.find(r=>r.id===editingId),files=[...(e.target.files||[])].filter(f=>f.type.startsWith("image/"));e.target.value="";if(!rec||!files.length)return;if(!Array.isArray(rec.photos))rec.photos=[];for(const file of files){const meta=await exifMeta(file);rec.photos.push(meta);await storePhotos(rec.id,[file])}rec.photoCount=rec.photos.length;rec.photoNames=rec.photos.map(p=>p.name);rec.updatedAt=new Date().toISOString();save();markDropboxDirty();renderRecords();renderEditPhotoMeta(rec);scheduleDropboxSync()});
 async function deleteEditingRecord(){if(editingId===null||!confirm("この記録を削除しますか？"))return;const id=editingId;records=records.filter(r=>r.id!==id);await deletePhotos(id);save();markDropboxDirty();renderRecords();closeEdit();scheduleDropboxSync()}
-async function showPhotos(id){const rows=await photosFor(id);photoModalContent.innerHTML="";if(!rows.length)photoModalContent.innerHTML="<p>写真がありません。</p>";rows.forEach(r=>{const url=URL.createObjectURL(r.blob),wrap=document.createElement("div");wrap.dataset.url=url;wrap.innerHTML=`<img src="${url}" alt="${esc(r.name)}"><div class="meta">${esc(r.name)}</div>`;photoModalContent.appendChild(wrap)});photoModal.classList.add("open")}
-function closePhotoModal(){photoModalContent.querySelectorAll("[data-url]").forEach(x=>URL.revokeObjectURL(x.dataset.url));photoModalContent.innerHTML="";photoModal.classList.remove("open")}
+// Export copies only; IndexedDB originals remain unchanged.
+let photoModalSession=0;
+function photoSaveName(name,index=0){
+  const clean=String(name||"").split(/[\\/]/).pop().replace(/[<>:"|?*\x00-\x1f]/g,"_").trim();
+  return clean && clean!=="." && clean!==".."?clean:`photo_${index+1}.jpg`;
+}
+async function savePhotoToDevice(row,index){
+  try{
+    const name=photoSaveName(row.name,index);
+    const file=new File([row.blob],name,{type:row.type||row.blob.type||"application/octet-stream"});
+    if(navigator.share && navigator.canShare?.({files:[file]})){
+      try{await navigator.share({files:[file]});return}
+      catch(e){if(e.name==="AbortError")return;if(e.name!=="NotAllowedError"&&e.name!=="NotSupportedError")throw e}
+    }
+    downloadBlob(row.blob,name);
+  }catch(e){console.error(e);alert("写真を保存できませんでした。写真を長押しして保存する方法もお試しください。")}
+}
+async function saveRecordPhotos(rows,id,button){
+  button.disabled=true;button.textContent="ZIPを作成中…";
+  try{
+    if(typeof JSZip==="undefined")throw new Error("ZIP機能を読み込めません。通信状態を確認して再読み込みしてください。");
+    const zip=new JSZip(),used=new Set();
+    rows.forEach((row,index)=>{
+      const original=photoSaveName(row.name,index);
+      let name=original,count=1;
+      while(used.has(name.toLowerCase())){
+        const dot=original.lastIndexOf(".");
+        name=dot>0?`${original.slice(0,dot)}_${count++}${original.slice(dot)}`:`${original}_${count++}`;
+      }
+      used.add(name.toLowerCase());zip.file(name,row.blob);
+    });
+    const blob=await zip.generateAsync({type:"blob",compression:"STORE"});
+    downloadBlob(blob,`record_${photoSaveName(String(id))}_photos.zip`);
+  }catch(e){console.error(e);alert(e.message||"写真のZIP保存に失敗しました。各写真の保存ボタンをお使いください。")}
+  finally{button.disabled=false;button.textContent="この記録の写真をまとめて保存（ZIP）"}
+}
+async function showPhotos(id){
+  closePhotoModal();
+  const session=photoModalSession;
+  photoModal.classList.add("open");photoModalContent.textContent="写真を読み込み中…";
+  try{
+    const rows=await photosFor(id);
+    if(session!==photoModalSession)return;
+    photoModalContent.innerHTML="";
+    if(!rows.length){photoModalContent.textContent="この端末には写真がありません。";return}
+    const bulk=document.createElement("button");
+    bulk.className="secondary";bulk.textContent="この記録の写真をまとめて保存（ZIP）";
+    bulk.onclick=()=>saveRecordPhotos(rows,id,bulk);photoModalContent.appendChild(bulk);
+    const hint=document.createElement("p");hint.className="meta";
+    hint.textContent="「端末に保存」は対応端末で共有メニューを開きます。保存先を選んでください。それ以外はダウンロードします。ZIPは解凍すると写真を取り出せます。";
+    photoModalContent.appendChild(hint);
+    rows.forEach((row,index)=>{
+      const url=URL.createObjectURL(row.blob),wrap=document.createElement("div");
+      wrap.dataset.url=url;
+      const img=document.createElement("img");img.src=url;img.alt=row.name||`写真${index+1}`;
+      const meta=document.createElement("div");meta.className="meta";meta.textContent=row.name||`写真${index+1}`;
+      const button=document.createElement("button");button.className="secondary";button.textContent="端末に保存";
+      button.style.margin="8px 0 16px";button.onclick=()=>savePhotoToDevice(row,index);
+      wrap.append(img,meta,button);photoModalContent.appendChild(wrap);
+    });
+  }catch(e){
+    if(session!==photoModalSession)return;
+    console.error(e);photoModalContent.textContent="写真を読み込めませんでした。もう一度開いてください。";
+  }
+}
+function closePhotoModal(){
+  photoModalSession++;
+  photoModalContent.querySelectorAll("[data-url]").forEach(x=>URL.revokeObjectURL(x.dataset.url));
+  photoModalContent.innerHTML="";photoModal.classList.remove("open");
+}
 
 function toast(msg){const el=document.getElementById("toast");if(!el)return;el.textContent=msg;el.classList.add("show");clearTimeout(toast._t);toast._t=setTimeout(()=>el.classList.remove("show"),1800)}
 function openDataMenu(){dataMenu.classList.add("open")}
