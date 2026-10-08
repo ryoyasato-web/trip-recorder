@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="現場記録">
-<title>出張現場記録 v0.7.0</title>
+<title>出張現場記録 v0.7.1</title>
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="apple-touch-icon" href="./icon-192.png">
 <script src="https://cdn.jsdelivr.net/npm/exif-js"></script>
@@ -84,7 +84,7 @@ input:focus,textarea:focus{border-color:#60a5fa;box-shadow:0 0 0 3px #dbeafe}
 <header>
   <div class="header-row">
     <div>
-      <div class="title">出張現場記録 <span style="font-size:11px;font-weight:500;color:#bfdbfe">v0.7.0</span></div>
+      <div class="title">出張現場記録 <span style="font-size:11px;font-weight:500;color:#bfdbfe">v0.7.1</span></div>
       <div id="clock" class="sub"></div>
     </div>
     <div class="header-actions">
@@ -369,16 +369,25 @@ function photoSaveName(name,index=0){
   const clean=String(name||"").split(/[\\/]/).pop().replace(/[<>:"|?*\x00-\x1f]/g,"_").trim();
   return clean && clean!=="." && clean!==".."?clean:`photo_${index+1}.jpg`;
 }
-async function savePhotoToDevice(row,index){
+async function savePhotoToDevice(row,index,share=false){
   try{
     const name=photoSaveName(row.name,index);
     const file=new File([row.blob],name,{type:row.type||row.blob.type||"application/octet-stream"});
-    if(navigator.share && navigator.canShare?.({files:[file]})){
+    if(share && navigator.share && navigator.canShare?.({files:[file]})){
       try{await navigator.share({files:[file]});return}
       catch(e){if(e.name==="AbortError")return;if(e.name!=="NotAllowedError"&&e.name!=="NotSupportedError")throw e}
     }
     downloadBlob(row.blob,name);
   }catch(e){console.error(e);alert("写真を保存できませんでした。写真を長押しして保存する方法もお試しください。")}
+}
+function photoShareButton(row,index){
+  try{
+    const file=new File([row.blob],photoSaveName(row.name,index),{type:row.type||row.blob.type||"application/octet-stream"});
+    if(!navigator.share || !navigator.canShare?.({files:[file]}))return null;
+    const button=document.createElement("button");button.className="secondary";button.textContent="共有／保存";
+    button.onclick=()=>savePhotoToDevice(row,index,true);
+    return button;
+  }catch(e){return null}
 }
 async function saveRecordPhotos(rows,id,button){
   button.disabled=true;button.textContent="ZIPを作成中…";
@@ -412,7 +421,7 @@ async function showPhotos(id){
     bulk.className="secondary";bulk.textContent="この記録の写真をまとめて保存（ZIP）";
     bulk.onclick=()=>saveRecordPhotos(rows,id,bulk);photoModalContent.appendChild(bulk);
     const hint=document.createElement("p");hint.className="meta";
-    hint.textContent="「端末に保存」は対応端末で共有メニューを開きます。保存先を選んでください。それ以外はダウンロードします。ZIPは解凍すると写真を取り出せます。";
+    hint.textContent="「端末に保存」で元のファイル名のままダウンロードします。対応端末では「共有／保存」から保存先も選べます。ZIPは解凍すると写真を取り出せます。";
     photoModalContent.appendChild(hint);
     rows.forEach((row,index)=>{
       const url=URL.createObjectURL(row.blob),wrap=document.createElement("div");
@@ -421,7 +430,9 @@ async function showPhotos(id){
       const meta=document.createElement("div");meta.className="meta";meta.textContent=row.name||`写真${index+1}`;
       const button=document.createElement("button");button.className="secondary";button.textContent="端末に保存";
       button.style.margin="8px 0 16px";button.onclick=()=>savePhotoToDevice(row,index);
-      wrap.append(img,meta,button);photoModalContent.appendChild(wrap);
+      wrap.append(img,meta,button);
+      const share=photoShareButton(row,index);if(share)wrap.appendChild(share);
+      photoModalContent.appendChild(wrap);
     });
   }catch(e){
     if(session!==photoModalSession)return;
@@ -472,7 +483,9 @@ async function openPhotoGallery(){
       preview.appendChild(img);preview.onclick=()=>showGalleryPhoto(row,index);
       const meta=document.createElement("div");meta.className="meta";meta.textContent=[time,record.location,row.name].filter(Boolean).join(" / ");
       const save=document.createElement("button");save.className="secondary";save.textContent="端末に保存";save.onclick=()=>savePhotoToDevice(row,index);
-      card.append(preview,meta,save);content.appendChild(card);
+      card.append(preview,meta,save);
+      const share=photoShareButton(row,index);if(share)card.appendChild(share);
+      content.appendChild(card);
     });
   }catch(e){
     if(session!==gallerySession)return;
@@ -486,7 +499,9 @@ function showGalleryPhoto(row,index){
   const img=document.createElement("img");img.src=url;img.alt=row.name||"記録写真";
   const meta=document.createElement("p");meta.className="meta";meta.textContent=row.name||"写真";
   const save=document.createElement("button");save.className="secondary";save.textContent="端末に保存";save.onclick=()=>savePhotoToDevice(row,index);
-  wrap.append(img,meta,save);photoModalContent.appendChild(wrap);photoModal.classList.add("open");
+  wrap.append(img,meta,save);
+  const share=photoShareButton(row,index);if(share)wrap.appendChild(share);
+  photoModalContent.appendChild(wrap);photoModal.classList.add("open");
 }
 function closePhotoGallery(){
   gallerySession++;
