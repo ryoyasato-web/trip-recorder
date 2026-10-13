@@ -2111,27 +2111,42 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
                 "アンテナ交換": "アンテナを交換した",
                 "電源確認": "電源状態を確認した",
                 "観測点到着": "",
-                "移動開始": "次の地点へ移動を開始した",
-                "作業終了": "作業を終了した",
+                "移動開始": "出発",
+                "作業終了": "作業終了",
                 "写真記録": ""
             };
             if (Object.prototype.hasOwnProperty.call(map, action)) return map[action];
             return action;
         }
 
+        function normalizeReportPunctuation(text) {
+            return String(text || "").replace(/、/g, "，").replace(/。/g, "．");
+        }
+
         function joinJapaneseClauses(clauses) {
-            const list = clauses.filter(Boolean);
+            const list = clauses.map(normalizeReportPunctuation).filter(Boolean);
             if (!list.length) return "";
             if (list.length === 1) return list[0];
-            return list.slice(0, -1).join("、") + "、" + list[list.length - 1];
+            return list.slice(0, -1).join("，") + "，" + list[list.length - 1];
+        }
+
+        function isReportLabel(text) {
+            const t = normalizeReportPunctuation(text).trim().replace(/[．.!！?？]+$/, "");
+            if (!t) return false;
+            return /^(?:出発|到着|現着|移動|移動開始|作業終了|撤収|観測点到着)$/.test(t);
+        }
+
+        function formatReportFragment(text) {
+            let t = normalizeReportPunctuation(text).trim();
+            if (!t) return "";
+            if (isReportLabel(t)) return t.replace(/[．.!！?？]+$/, "");
+            if (/[．！!？?]$/.test(t)) return t;
+            return t + "．";
         }
 
         function ensurePeriod(text) {
-            const t = String(text || "").trim();
-            if (!t) return "";
-            return /[。！？!?]$/.test(t) ? t : t + "。";
+            return formatReportFragment(text);
         }
-
 
         function eventCoordsText(event) {
             if (!Number.isFinite(Number(event?.lat)) || !Number.isFinite(Number(event?.lng))) return "";
@@ -2266,27 +2281,26 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
                 .map(actionPhrase)
                 .filter(Boolean);
 
-            let first = "";
-
-            // 時刻・場所は本文に入れない。見出し側にだけ表示する。
+            const lines = [];
             if (moving && !mainActions.length && !notes.length) {
-                first = "次の地点へ移動を開始した。";
+                lines.push("出発");
             } else if (arrived) {
                 if (mainActions.length) {
-                    first = `到着後、${joinJapaneseClauses(mainActions)}。`;
+                    lines.push(formatReportFragment("到着後，" + joinJapaneseClauses(mainActions)));
                 } else if (!notes.length) {
-                    first = "到着した。";
+                    lines.push("到着");
                 }
             } else if (mainActions.length) {
-                first = `${joinJapaneseClauses(mainActions)}。`;
-            } else if (notes.length) {
-                // 自由メモそのものが作業内容なので、意味のない「作業記録を行った」は付けない。
-                first = "";
+                lines.push(formatReportFragment(joinJapaneseClauses(mainActions)));
             }
 
-            const noteSentences = notes.map(ensurePeriod).join("");
-            const endSentence = ended && !/作業を終了/.test(first) ? "一連の作業を終了した。" : "";
-            return `${first}${noteSentences}${endSentence}`.trim();
+            notes.forEach(note => {
+                const formatted = formatReportFragment(note);
+                if (formatted) lines.push(formatted);
+            });
+
+            if (ended && !lines.includes("作業終了")) lines.push("作業終了");
+            return lines.join("\n").trim();
         }
 
         function stripLegacyEventHeaderFromProse(event, proseValue) {
