@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>出張メール・報告ジェネレーター PC v0.6.21 (ERI 総合観測室向け)</title>
+    <title>出張メール・報告ジェネレーター PC v0.6.22 (ERI 総合観測室向け)</title>
     <!-- Tailwind CSS for styling -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- EXIF.js for reading image metadata -->
@@ -132,7 +132,7 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
 
     <header class="bg-blue-800 text-white p-4 shadow-md flex-shrink-0 flex justify-between items-center">
         <div>
-            <h1 class="text-xl font-bold">出張メール・報告ジェネレーター <span class="text-sm font-normal text-blue-200">PC v0.6.21</span></h1>
+            <h1 class="text-xl font-bold">出張メール・報告ジェネレーター <span class="text-sm font-normal text-blue-200">PC v0.6.22</span></h1>
             <p class="text-xs text-blue-200">現場記録を長期保存し、出張報告まで一元管理</p>
         </div>
         <div class="flex items-center gap-3">
@@ -2243,9 +2243,14 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
             }
         }
 
+        function reusablePlacesForEvent(event) {
+            if (!placeHasCoordinates(event)) return placeDictionary;
+            return savedPlaceCandidates(Number(event.lat), Number(event.lng), 100);
+        }
+
         function selectEventSavedPlace(id, name) {
             const ev = events.find(e => e.id === id);
-            const place = placeDictionary.find(item => item.name === name);
+            const place = ev && reusablePlacesForEvent(ev).find(item => item.name === name);
             if (!ev || !place) return;
             // 名称だけを再利用する。元記録のGPSと手修正した本文は保持する。
             ev.location = place.name;
@@ -2698,6 +2703,8 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
                 (totalPhotos ? `（写真 ${totalPhotos}枚）` : "");
 
             events.forEach((ev, idx) => {
+                const savedPlaces = reusablePlacesForEvent(ev);
+                const hasGPS = placeHasCoordinates(ev);
                 const el = document.createElement("div");
                 el.className = "rounded-lg border bg-white p-3 shadow-sm";
                 const range = ev.startTime === ev.endTime ? ev.startTime : `${ev.startTime}～${ev.endTime}`;
@@ -2729,16 +2736,16 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
                                         <label for="saved-place-${ev.id}" class="block text-[11px] text-gray-500">よく使う場所</label>
                                         <div class="flex flex-wrap gap-2 mt-1">
                                             <select id="saved-place-${ev.id}" onchange="if(this.value) selectEventSavedPlace(${ev.id}, this.value)"
-                                                class="flex-1 min-w-0 border rounded p-2 text-sm bg-white" ${placeDictionary.length ? "" : "disabled"}>
-                                                <option value="">${placeDictionary.length ? "保存済みの場所を選択" : "登録済みの場所はありません"}</option>
-                                                ${placeDictionary.map(place => `<option value="${escapeHtml(place.name)}" ${place.name===eventDisplayLocation(ev)?"selected":""}>${escapeHtml(place.name)}</option>`).join("")}
+                                                class="flex-1 min-w-0 border rounded p-2 text-sm bg-white" ${savedPlaces.length ? "" : "disabled"}>
+                                                <option value="">${savedPlaces.length ? "保存済みの場所を選択" : hasGPS ? "100m以内に登録済みの場所はありません" : "登録済みの場所はありません"}</option>
+                                                ${savedPlaces.map(place => `<option value="${escapeHtml(place.name)}" ${place.name===eventDisplayLocation(ev)?"selected":""}>${escapeHtml(place.name)}${hasGPS ? "（" + Math.round(place.distance) + "m）" : ""}</option>`).join("")}
                                             </select>
                                             <button onclick="deleteSavedPlace(document.getElementById('saved-place-${ev.id}').value)"
-                                                class="text-xs bg-red-50 border rounded px-3" ${placeDictionary.some(place => place.name===eventDisplayLocation(ev)) ? "" : "disabled"}>
+                                                class="text-xs bg-red-50 border rounded px-3" ${savedPlaces.some(place => place.name===eventDisplayLocation(ev)) ? "" : "disabled"}>
                                                 選択した保存場所を削除
                                             </button>
                                         </div>
-                                        <p class="text-[11px] text-gray-500 mt-1">GPSがない記録でも場所名を使えます．削除は保存一覧だけに反映します．</p>
+                                        <p class="text-[11px] text-gray-500 mt-1">${hasGPS ? "イベントのGPSから100m以内の保存場所を近い順に表示します．" : "GPSがない記録では保存済みの場所名をすべて表示します．"}削除は保存一覧だけに反映します．</p>
                                     </div>
 
                                     ${(ev.locationMode||"manual")==="manual" ? `
@@ -3735,8 +3742,9 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
             window.open(url, '_blank');
         }
 
-        const STORAGE_KEY = "eri_trip_report_pc_v0621";
+        const STORAGE_KEY = "eri_trip_report_pc_v0622";
         const LEGACY_STORAGE_KEYS = [
+            "eri_trip_report_pc_v0621",
             "eri_trip_report_pc_v0620",
             "eri_trip_report_pc_v0616",
             "eri_trip_report_pc_v0615",
