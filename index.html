@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="現場記録">
-<title>出張現場記録 v0.7.4</title>
+<title>出張現場記録 v0.7.5</title>
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="apple-touch-icon" href="./icon-192.png">
 <script src="https://cdn.jsdelivr.net/npm/exif-js"></script>
@@ -125,13 +125,27 @@ button:hover:not(:disabled),.camera-button:hover{filter:brightness(.96)}
 .gallery-item,.gallery-toolbar,.install-banner{border-radius:8px}.gallery-grid{gap:16px}.gallery-toolbar-row{gap:8px}.gallery-item.selected{border-color:var(--ui-blue)}.gallery-day{font-size:18px}
 @media(max-width:400px){.card,.sheet,.modal-card{padding:16px}.gallery-grid{grid-template-columns:1fr}.header-actions{width:100%}.chip{flex:1;padding:8px}.small-row{flex-wrap:wrap}.small-row input{flex-basis:100%}}
 
+
+/* Keep gallery controls inside the mobile viewport. */
+.header-row>div{min-width:0;max-width:100%}
+.modal-card{min-width:0;max-width:100%;overflow-y:auto;overflow-x:hidden}
+.sheet-title>span{min-width:0;overflow-wrap:anywhere}
+.sheet-title>.ghost{flex-shrink:0}
+.gallery-toolbar-row>*{min-width:0;max-width:100%}
+.gallery-toolbar .secondary{white-space:normal;overflow-wrap:anywhere}
+.gallery-toolbar .meta{overflow-wrap:anywhere}
+.gallery-select input{width:18px;height:18px;flex:0 0 18px;padding:0;margin:0}
+.gallery-select span{min-width:0;overflow-wrap:anywhere}
+.gallery-date input{width:100%;max-width:100%;min-width:0;min-inline-size:0;-webkit-appearance:none;appearance:none}
+@media(max-width:480px){.gallery-date{flex-direction:column}.gallery-date label{flex:auto;width:100%}}
+
 </style>
 </head>
 <body>
 <header>
   <div class="header-row">
     <div>
-      <div class="title">出張現場記録 <span style="font-size:11px;font-weight:500;color:#bfdbfe">v0.7.4</span></div>
+      <div class="title">出張現場記録 <span style="font-size:11px;font-weight:500;color:#bfdbfe">v0.7.5</span></div>
       <div id="clock" class="sub"></div>
     </div>
     <div class="header-actions">
