@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="現場記録">
-<title>出張現場記録 v0.7.6</title>
+<title>出張現場記録 v0.7.7</title>
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="apple-touch-icon" href="./icon-192.png">
 <script src="https://cdn.jsdelivr.net/npm/exif-js"></script>
@@ -192,7 +192,7 @@ button:hover:not(:disabled),.camera-button:hover{filter:none}
 <header>
   <div class="header-row">
     <div>
-      <div class="title">出張現場記録 <span style="font-size:11px;font-weight:500;color:#bfdbfe">v0.7.6</span></div>
+      <div class="title">出張現場記録 <span style="font-size:11px;font-weight:500;color:#bfdbfe">v0.7.7</span></div>
       <div id="clock" class="sub"></div>
     </div>
     <div class="header-actions">
@@ -200,6 +200,7 @@ button:hover:not(:disabled),.camera-button:hover{filter:none}
       <button id="dropbox-chip" class="chip" onclick="openDropboxMenu()">☁ 未設定</button>
       <button class="chip" onclick="openDiagnosis()">診断</button>
       <button class="chip" onclick="openDataMenu()">データ</button>
+      <button class="chip" onclick="refreshApp(this)">更新</button>
     </div>
   </div>
 </header>
@@ -1228,7 +1229,39 @@ window.addEventListener("beforeinstallprompt",e=>{e.preventDefault();deferredIns
 async function installApp(){if(!deferredInstall)return;deferredInstall.prompt();await deferredInstall.userChoice;deferredInstall=null;installBanner.classList.remove("show")}
 window.addEventListener("appinstalled",()=>installBanner.classList.remove("show"));
 
-if("serviceWorker" in navigator){window.addEventListener("load",()=>navigator.serviceWorker.register("./sw.js").catch(console.warn))}
+
+async function refreshApp(button){
+  if(editingId!==null){alert("編集中の記録を保存してから更新してください。");return}
+  if(!navigator.onLine){alert("更新にはインターネット接続が必要です。");return}
+  button.disabled=true;button.textContent="更新中…";
+  try{
+    save();
+    const url=new URL(location.href);
+    url.searchParams.set("_update",String(Date.now()));
+    const response=await fetch(url.href,{cache:"no-store"});
+    if(!response.ok)throw new Error("最新版を取得できませんでした。時間をおいて再度お試しください。");
+    const html=await response.text();
+    if(!html.includes('id="photo-input"'))throw new Error("更新ページを確認できませんでした。");
+    location.replace(url.href);
+  }catch(e){
+    console.error(e);alert(e.message||"更新できませんでした。");
+    button.disabled=false;button.textContent="更新";
+  }
+}
+let appUpdateCheckedAt=0;
+async function checkAppUpdate(){
+  if(!("serviceWorker" in navigator)||!navigator.onLine||document.hidden)return;
+  if(Date.now()-appUpdateCheckedAt<60000)return;
+  appUpdateCheckedAt=Date.now();
+  try{
+    const reg=await navigator.serviceWorker.register("./sw.js",{updateViaCache:"none"});
+    await reg.update();
+  }catch(e){console.warn(e)}
+}
+window.addEventListener("load",checkAppUpdate);
+window.addEventListener("online",checkAppUpdate);
+document.addEventListener("visibilitychange",()=>{if(!document.hidden)checkAppUpdate()});
+
 document.addEventListener("visibilitychange",()=>{if(!document.hidden)startGPS(false)});
 
 load();renderActions();renderRecords();renderDropboxChip();startGPS(false);
