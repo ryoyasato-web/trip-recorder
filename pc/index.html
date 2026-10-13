@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>出張メール・報告ジェネレーター PC v0.6.19 (ERI 総合観測室向け)</title>
+    <title>出張メール・報告ジェネレーター PC v0.6.20 (ERI 総合観測室向け)</title>
     <!-- Tailwind CSS for styling -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- EXIF.js for reading image metadata -->
@@ -132,7 +132,7 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
 
     <header class="bg-blue-800 text-white p-4 shadow-md flex-shrink-0 flex justify-between items-center">
         <div>
-            <h1 class="text-xl font-bold">出張メール・報告ジェネレーター <span class="text-sm font-normal text-blue-200">PC v0.6.19</span></h1>
+            <h1 class="text-xl font-bold">出張メール・報告ジェネレーター <span class="text-sm font-normal text-blue-200">PC v0.6.20</span></h1>
             <p class="text-xs text-blue-200">現場記録を長期保存し、出張報告まで一元管理</p>
         </div>
         <div class="flex items-center gap-3">
@@ -2673,17 +2673,36 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
                                     </select>
 
                                     ${(ev.locationMode||"manual")==="manual" ? `
-                                    <input value="${escapeHtml(ev.location || "")}"
-                                        onchange="updateEvent(${ev.id}, 'location', this.value); renderEvents()"
-                                        class="w-full border rounded p-2 text-sm mt-2" placeholder="観測点名・任意の場所名">` : ""}
+                                    <div class="mt-2 flex flex-col sm:flex-row gap-2">
+                                        <input value="${escapeHtml(ev.location || "")}"
+                                            onchange="updateEvent(${ev.id}, 'location', this.value); renderEvents()"
+                                            class="flex-1 border rounded p-2 text-sm" placeholder="観測点名・任意の場所名">
+                                        ${Number.isFinite(Number(ev.lat)) && Number.isFinite(Number(ev.lng)) && String(ev.location||"").trim() ? `
+                                        <button onclick="rememberEventLocation(${ev.id})"
+                                            class="text-xs border border-blue-200 rounded px-3 bg-blue-50 text-blue-800 hover:bg-blue-100">
+                                            この場所名を記憶
+                                        </button>` : ""}
+                                    </div>` : ""}
 
                                     ${ev.locationMode==="auto" ? `
                                     <div class="mt-2 flex gap-2">
                                         <div class="flex-1 border rounded p-2 text-sm bg-emerald-50 min-h-[40px]">${escapeHtml(ev.autoLocation || "未取得")}</div>
-                                        <button onclick="lookupEventAutoLocation(${ev.id})" class="text-xs border rounded px-3 bg-white hover:bg-gray-50">再取得</button>
+                                        <button onclick="lookupEventAutoLocation(${ev.id})" class="text-xs border rounded px-3 bg-white hover:bg-gray-50">周辺候補を取得</button>
                                     </div>
-                                    ${ev.autoLocationFull && ev.autoLocationFull !== ev.autoLocation ? `<div class="text-[10px] text-gray-400 mt-1">${escapeHtml(ev.autoLocationFull)}</div>` : ""}` : ""}
-
+                                    ${eventCandidateList(ev.id).length ? `
+                                    <label class="block text-[11px] text-gray-500 mt-2">周辺の場所候補</label>
+                                    <select onchange="if(this.value!=='') selectEventLocationCandidate(${ev.id}, this.value)"
+                                        class="w-full border rounded p-2 text-sm bg-white mt-1">
+                                        <option value="">候補を選択</option>
+                                        ${eventCandidateList(ev.id).map((candidate, candidateIndex) => `
+                                            <option value="${candidateIndex}" ${candidate.name===ev.autoLocation?"selected":""}>
+                                                ${escapeHtml(candidate.name)}（${Math.round(candidate.distance)}m / ${candidate.source==="saved"?"場所辞書":candidate.source==="osm"?"OSM":"住所逆引き"}）
+                                            </option>`).join("")}
+                                    </select>` : ""}
+                                    ${ev.autoLocationFull && ev.autoLocationFull !== ev.autoLocation ? `<div class="text-[10px] text-gray-400 mt-1">${escapeHtml(ev.autoLocationFull)}</div>` : ""}
+                                    ${String(ev.autoLocation||"").trim() && ev.autoLocation!=="候補を検索中…" ? `
+                                    <button onclick="rememberEventLocation(${ev.id})"
+                                        class="mt-2 text-[11px] text-blue-700 hover:underline">この場所名を場所辞書に記憶</button>` : ""}` : ""}
                                     ${ev.locationMode==="coords" ? `
                                     <div class="mt-2 border rounded p-2 font-mono text-sm bg-gray-50">${escapeHtml(eventCoordsText(ev) || "位置情報なし")}</div>
                                     <div class="text-[10px] text-gray-400 mt-1">緯度経度は報告本文には出しません。</div>` : ""}
@@ -3648,8 +3667,9 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
             window.open(url, '_blank');
         }
 
-        const STORAGE_KEY = "eri_trip_report_pc_v0616";
+        const STORAGE_KEY = "eri_trip_report_pc_v0620";
         const LEGACY_STORAGE_KEYS = [
+            "eri_trip_report_pc_v0616",
             "eri_trip_report_pc_v0615",
             "eri_trip_report_pc_v0614",
             "eri_trip_report_pc_v0613",
