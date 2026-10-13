@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>出張メール・報告ジェネレーター PC v0.6.24 (ERI 総合観測室向け)</title>
+    <title>出張メール・報告ジェネレーター PC v0.6.25 (ERI 総合観測室向け)</title>
     <!-- Tailwind CSS for styling -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- EXIF.js for reading image metadata -->
@@ -132,7 +132,7 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
 
     <header class="bg-blue-800 text-white p-4 shadow-md flex-shrink-0 flex justify-between items-center">
         <div>
-            <h1 class="text-xl font-bold">出張メール・報告ジェネレーター <span class="text-sm font-normal text-blue-200">PC v0.6.24</span></h1>
+            <h1 class="text-xl font-bold">出張メール・報告ジェネレーター <span class="text-sm font-normal text-blue-200">PC v0.6.25</span></h1>
             <p class="text-xs text-blue-200">現場記録を長期保存し、出張報告まで一元管理</p>
         </div>
         <div class="flex items-center gap-3">
@@ -3749,6 +3749,50 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
             updatePreview();
         }
 
+
+        function renderDayEventReport(dayEvents) {
+            // 保存済みの本文は変更せず、同じ日の同時刻・同場所の出力だけまとめる。
+            const blocks = [];
+            const byHeading = new Map();
+            const canonicalHeading = text => String(text).trim().replace(
+                /^(\d{1,2}:\d{2}(?:～\d{1,2}:\d{2})?)\s+/, "$1　");
+            const add = (heading, lines) => {
+                const key = canonicalHeading(heading);
+                let block = byHeading.get(key);
+                if (!block) {
+                    block = { heading: key, lines: [], seen: new Set() };
+                    byHeading.set(key, block);
+                    blocks.push(block);
+                }
+                lines.forEach(line => {
+                    const content = line.trim();
+                    if (content && !block.seen.has(content)) {
+                        block.seen.add(content);
+                        block.lines.push(line);
+                    }
+                });
+            };
+            dayEvents.forEach(ev => {
+                const range = ev.startTime === ev.endTime ? ev.startTime : ev.startTime + "～" + ev.endTime;
+                const place = eventReportLocation(ev);
+                let heading = range + (place ? "　" + place : "");
+                let content = [];
+                const prose = stripLegacyEventHeaderFromProse(ev, ev.prose || "").trim();
+                const text = [prose, ...eventTimedLines(ev, prose)].filter(Boolean).join("\n");
+                text.split("\n").forEach(line => {
+                    if (/^\d{1,2}:\d{2}(?:～\d{1,2}:\d{2})?(?:[　\s]+.*)?$/.test(line.trim())) {
+                        add(heading, content);
+                        heading = line.trim();
+                        content = [];
+                    } else {
+                        content.push(line);
+                    }
+                });
+                add(heading, content);
+            });
+            return blocks.map(block => [block.heading, ...block.lines].join("\n")).join("\n\n");
+        }
+
         function updatePreview() {
             // 可変フォームの現在値を必ずプレビュー用テキストへ同期する
             syncBasicInfoText();
@@ -3808,25 +3852,7 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
                             reportText += `${Number(p[1])}月${Number(p[2])}日(${dow})\n`;
                         }
 
-                        dayEvents.forEach((ev, eventIndex) => {
-                            const range = ev.startTime === ev.endTime ? ev.startTime : `${ev.startTime}～${ev.endTime}`;
-                            const displayLocation = eventReportLocation(ev);
-                            reportText += `${range}${displayLocation ? "　"+displayLocation : ""}\n`;
-
-                            const prose = stripLegacyEventHeaderFromProse(ev, ev.prose || "").trim();
-                            if (prose) reportText += `${prose}\n`;
-                            const heading = range + (displayLocation ? "　" + displayLocation : "");
-                            eventTimedLines(ev, prose).forEach((block, index) => {
-                                // 1件だけのイベントで同じ時刻・場所を連続して出さない。
-                                if (!prose && index === 0 && block.split("\n")[0] === heading) {
-                                    block = block.split("\n").slice(1).join("\n");
-                                }
-                                reportText += `${block}\n`;
-                            });
-
-                            // 同じ日の別記録も見分けやすいよう、記録間に1行空ける。
-                            if (eventIndex < dayEvents.length - 1) reportText += "\n";
-                        });
+                        reportText += renderDayEventReport(dayEvents) + "\n";
                         if (showDateHeadings) reportText += "\n";
                     }
                 } else if (logs.length === 0) {
