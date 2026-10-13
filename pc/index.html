@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>出張メール・報告ジェネレーター PC v0.6.22 (ERI 総合観測室向け)</title>
+    <title>出張メール・報告ジェネレーター PC v0.6.23 (ERI 総合観測室向け)</title>
     <!-- Tailwind CSS for styling -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- EXIF.js for reading image metadata -->
@@ -132,7 +132,7 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
 
     <header class="bg-blue-800 text-white p-4 shadow-md flex-shrink-0 flex justify-between items-center">
         <div>
-            <h1 class="text-xl font-bold">出張メール・報告ジェネレーター <span class="text-sm font-normal text-blue-200">PC v0.6.22</span></h1>
+            <h1 class="text-xl font-bold">出張メール・報告ジェネレーター <span class="text-sm font-normal text-blue-200">PC v0.6.23</span></h1>
             <p class="text-xs text-blue-200">現場記録を長期保存し、出張報告まで一元管理</p>
         </div>
         <div class="flex items-center gap-3">
@@ -2465,8 +2465,64 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
             eventMapModal.classList.remove("flex");
         }
 
+
+        // 指定は元記録IDに紐づけ、イベントの分割・再生成後も引き継ぐ。
+        function sourceTimeIsKept(log) {
+            if (typeof log.keepReportTime === "boolean") return log.keepReportTime;
+            return /移動開始|出発|観測点到着|到着|作業終了|撤収/.test(String(log.task || ""));
+        }
+
+        function eventSourceLogs(event) {
+            return (event.sourceLogIds || [])
+                .map(id => logs.find(log => String(log.id) === String(id)))
+                .filter(Boolean);
+        }
+
+        function eventSummaryTasks(event) {
+            const sources = eventSourceLogs(event);
+            return sources.length
+                ? uniqueNonEmpty(sources.filter(log => !sourceTimeIsKept(log)).flatMap(splitTasks))
+                : (event.tasks || []);
+        }
+
+        function setSourceReportTime(eventId, sourceId, checked) {
+            const log = logs.find(log => String(log.id) === String(sourceId));
+            if (!log) return;
+            const affected = events.filter(ev => (ev.sourceLogIds || []).some(id => String(id) === String(sourceId)));
+            const edited = new Set(affected.filter(eventProseWasEdited));
+            log.keepReportTime = Boolean(checked);
+            affected.forEach(ev => {
+                    if (!edited.has(ev)) {
+                        ev.prose = generateEventProse(ev);
+                        ev.proseEdited = false;
+                    }
+                });
+            renderEvents();
+            updatePreview();
+            saveDraft();
+        }
+
+        function eventTimedLines(event, prose = "") {
+            const existingLines = String(prose).split("\n").map(line => line.trim());
+            return eventSourceLogs(event)
+                .filter(sourceTimeIsKept)
+                .sort((a, b) => String(a.time).localeCompare(String(b.time)))
+                .flatMap(log => {
+                    const time = String(log.time || "").match(/(?:^|\s)(\d{1,2}:\d{2})/);
+                    if (!time) return [];
+                    return splitTasks(log).filter(task => task !== "写真記録" && !/^写真撮影時刻：/.test(task))
+                        .map(task => {
+                            const phrase = /^(観測点到着|到着)$/.test(task) ? "到着"
+                                : /^(移動開始|出発)$/.test(task) ? "出発"
+                                : /^(作業終了|撤収)$/.test(task) ? task : actionPhrase(task);
+                            return phrase ? time[1] + "　" + formatReportFragment(phrase) : "";
+                        })
+                        .filter(line => line && !existingLines.includes(line));
+                });
+        }
+
         function generateEventProse(event) {
-            const tasks = uniqueNonEmpty(event.tasks || []);
+            const tasks = uniqueNonEmpty(eventSummaryTasks(event));
             const arrived = tasks.includes("観測点到着");
             const moving = tasks.includes("移動開始");
             const ended = tasks.includes("作業終了");
@@ -2552,7 +2608,8 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
             const prose = String(event.prose || "").trim();
             if (!prose) return false;
             try {
-                return prose !== String(generateEventProse(event) || "").trim();
+                return prose !== String(generateEventProse(event) || "").trim() &&
+                    prose !== String(generateEventProse({...event, sourceLogIds: []}) || "").trim();
             } catch (e) {
                 return false;
             }
@@ -2561,6 +2618,7 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
         function buildEventsFromLogs(userInitiated = false) {
             const previousEvents = Array.isArray(events) ? events.map(e => ({...e})) : [];
             const previousBySource = new Map(previousEvents.map(e => [eventSourceKey(e), e]));
+            logs.forEach(log => { if (typeof log.keepReportTime !== "boolean") log.keepReportTime = sourceTimeIsKept(log); });
             const sourceLogs = logs
                 .filter(l => l.time)
                 .map(l => ({...l, _date: parseLogDate(l.time)}))
@@ -2598,6 +2656,7 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
                 }
             }
 
+            const reusedEditedEvents = new Set();
             events = groups.map(group => {
                 const coords = eventCoordsFromLogs(group);
                 const start = group[0]._date;
@@ -2606,7 +2665,11 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
                 const photoCount = group.reduce((sum,l) => sum + (Number(l.photoCount) || 0), 0);
                 const sourceLogIds = group.map(l => l.id);
                 const sourceKey = sourceLogIds.map(Number).filter(Number.isFinite).sort((a,b)=>a-b).join(",");
-                const previous = previousBySource.get(sourceKey) || null;
+                const previous = previousBySource.get(sourceKey) || previousEvents.find(ev =>
+                    eventProseWasEdited(ev) && !reusedEditedEvents.has(ev) &&
+                    sourceLogIds.every(id => (ev.sourceLogIds || []).some(oldId => String(oldId) === String(id)))
+                ) || null;
+                if (previous) reusedEditedEvents.add(previous);
 
                 const event = {
                     id: previous?.id ?? eventIdCounter++,
@@ -2787,7 +2850,14 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
                                     <summary class="cursor-pointer px-3 py-2 text-[11px] text-gray-600">
                                         元記録を確認（${ev.sourceLogIds?.length || 0}件）
                                     </summary>
-                                    <div class="px-3 pb-3 text-xs text-gray-600">${escapeHtml(tasks || "（作業内容なし）")}</div>
+                                    <div class="px-3 pb-3 space-y-2 text-xs text-gray-600">
+                                        ${eventSourceLogs(ev).map(log => `<label class="flex items-start gap-2">
+                                            <input type="checkbox" ${sourceTimeIsKept(log) ? "checked" : ""}
+                                                onchange="setSourceReportTime(${ev.id}, ${Number(log.id)}, this.checked)">
+                                            <span>時刻を残す　${escapeHtml(log.time || "")}　${escapeHtml(splitTasks(log).join(" / ") || "（作業内容なし）")}</span>
+                                        </label>`).join("")}
+                                        <p>手修正済みの報告文は保持し，時刻付き行を追加します．本文に同じ内容がある場合は調整してください．</p>
+                                    </div>
                                 </details>
                             </div>
                             <div class="mt-2">
@@ -3651,13 +3721,8 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
                             reportText += `${range}${displayLocation ? "　"+displayLocation : ""}\n`;
 
                             const prose = stripLegacyEventHeaderFromProse(ev, ev.prose || "").trim();
-                            if (prose) {
-                                reportText += `${prose}\n`;
-                            } else {
-                                (ev.tasks || [])
-                                    .filter(t => t !== "写真記録" && !/^写真撮影時刻：/.test(t))
-                                    .forEach(t => reportText += `　・${t}\n`);
-                            }
+                            if (prose) reportText += `${prose}\n`;
+                            eventTimedLines(ev, prose).forEach(line => reportText += `${line}\n`);
 
                             // 同じ日の別記録も見分けやすいよう、記録間に1行空ける。
                             if (eventIndex < dayEvents.length - 1) reportText += "\n";
@@ -3742,8 +3807,9 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
             window.open(url, '_blank');
         }
 
-        const STORAGE_KEY = "eri_trip_report_pc_v0622";
+        const STORAGE_KEY = "eri_trip_report_pc_v0623";
         const LEGACY_STORAGE_KEYS = [
+            "eri_trip_report_pc_v0622",
             "eri_trip_report_pc_v0621",
             "eri_trip_report_pc_v0620",
             "eri_trip_report_pc_v0616",
@@ -3863,6 +3929,7 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
                         if (out.autoLocationFull === undefined) out.autoLocationFull = "";
                         if (typeof out.prose === "string") out.prose = stripLegacyEventHeaderFromProse(out, out.prose);
                         if (out.proseEdited === undefined) out.proseEdited = eventProseWasEdited(out);
+                        if (!out.proseEdited) out.prose = generateEventProse(out);
                         return out;
                     });
                 }
