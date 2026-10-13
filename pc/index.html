@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>出張メール・報告ジェネレーター PC v0.6.20 (ERI 総合観測室向け)</title>
+    <title>出張メール・報告ジェネレーター PC v0.6.21 (ERI 総合観測室向け)</title>
     <!-- Tailwind CSS for styling -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- EXIF.js for reading image metadata -->
@@ -132,7 +132,7 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
 
     <header class="bg-blue-800 text-white p-4 shadow-md flex-shrink-0 flex justify-between items-center">
         <div>
-            <h1 class="text-xl font-bold">出張メール・報告ジェネレーター <span class="text-sm font-normal text-blue-200">PC v0.6.20</span></h1>
+            <h1 class="text-xl font-bold">出張メール・報告ジェネレーター <span class="text-sm font-normal text-blue-200">PC v0.6.21</span></h1>
             <p class="text-xs text-blue-200">現場記録を長期保存し、出張報告まで一元管理</p>
         </div>
         <div class="flex items-center gap-3">
@@ -2151,17 +2151,40 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
             return formatReportFragment(text);
         }
 
+        function placeHasCoordinates(place) {
+            return place && place.lat !== null && place.lat !== undefined && String(place.lat).trim() !== ""
+                && place.lng !== null && place.lng !== undefined && String(place.lng).trim() !== ""
+                && Number.isFinite(Number(place.lat)) && Number.isFinite(Number(place.lng))
+                && Math.abs(Number(place.lat)) <= 90 && Math.abs(Number(place.lng)) <= 180;
+        }
+
         function loadPlaceDictionary() {
             try {
                 const raw = JSON.parse(localStorage.getItem(PLACE_DICTIONARY_KEY) || "[]");
                 if (!Array.isArray(raw)) return [];
-                return raw.map(item => ({
-                    id: String(item && item.id || ""),
-                    name: String(item && item.name || "").trim(),
-                    lat: Number(item && item.lat),
-                    lng: Number(item && item.lng),
-                    updatedAt: String(item && item.updatedAt || "")
-                })).filter(item => item.name && Number.isFinite(item.lat) && Number.isFinite(item.lng));
+                const byName = new Map();
+                // 同名の旧データは最新を採用し、名前だけのデータにも対応する。
+                raw.filter(item => item && typeof item === "object")
+                    .sort((a,b) => String(b.updatedAt || "").localeCompare(String(a.updatedAt || "")))
+                    .forEach(item => {
+                        const name = String(item.name || "").trim();
+                        if (!name) return;
+                        const coords = placeHasCoordinates(item);
+                        if (byName.has(name)) {
+                            const existing = byName.get(name);
+                            if (!placeHasCoordinates(existing) && coords) {
+                                existing.lat = Number(item.lat); existing.lng = Number(item.lng);
+                            }
+                            return;
+                        }
+                        byName.set(name, {
+                            id: String(item.id || "place-" + byName.size),
+                            name, lat: coords ? Number(item.lat) : null,
+                            lng: coords ? Number(item.lng) : null,
+                            updatedAt: String(item.updatedAt || "")
+                        });
+                    });
+                return [...byName.values()].slice(0, 200);
             } catch (e) {
                 console.warn("場所辞書を読み込めません", e);
                 return [];
@@ -2171,49 +2194,79 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
         function savePlaceDictionary() {
             try {
                 localStorage.setItem(PLACE_DICTIONARY_KEY, JSON.stringify(placeDictionary.slice(0, 200)));
+                return true;
             } catch (e) {
                 console.warn("場所辞書を保存できません", e);
+                return false;
             }
         }
 
         function rememberPlace(name, lat, lng) {
             const cleanName = String(name || "").trim();
-            const y = Number(lat), x = Number(lng);
-            if (!cleanName || !Number.isFinite(y) || !Number.isFinite(x)) return false;
-            const nearby = placeDictionary.find(item => item.name === cleanName && haversineMeters(item.lat, item.lng, y, x) <= 50);
+            if (!cleanName) return false;
+            const coords = placeHasCoordinates({lat, lng});
+            const existing = placeDictionary.find(item => item.name === cleanName);
             const now = new Date().toISOString();
-            if (nearby) {
-                nearby.lat = y; nearby.lng = x; nearby.updatedAt = now;
+            const previous = placeDictionary.map(item => ({...item}));
+            if (existing) {
+                // 名前だけの再登録では、保存済みの座標を失わない。
+                if (coords) { existing.lat = Number(lat); existing.lng = Number(lng); }
+                existing.updatedAt = now;
+                placeDictionary = placeDictionary.filter(item => item === existing || item.name !== cleanName);
             } else {
                 placeDictionary.unshift({
                     id: crypto.randomUUID ? crypto.randomUUID() : "place-" + Date.now() + "-" + Math.random().toString(36).slice(2),
-                    name: cleanName, lat: y, lng: x, updatedAt: now
+                    name: cleanName, lat: coords ? Number(lat) : null,
+                    lng: coords ? Number(lng) : null, updatedAt: now
                 });
             }
             placeDictionary.sort((a,b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
             placeDictionary = placeDictionary.slice(0, 200);
-            savePlaceDictionary();
-            return true;
+            if (savePlaceDictionary()) return true;
+            placeDictionary = previous;
+            return false;
         }
 
         function rememberEventLocation(id) {
             const ev = events.find(e => e.id === id);
-            if (!ev || !Number.isFinite(Number(ev.lat)) || !Number.isFinite(Number(ev.lng))) {
-                alert("この記録には位置情報がないため，場所名を記憶できません．");
-                return;
-            }
-            const name = ev.locationMode === "auto" ? ev.autoLocation : ev.location;
-            if (!String(name || "").trim()) {
+            if (!ev) return;
+            const name = String(ev.locationMode === "auto" ? ev.autoLocation || "" : ev.location || "").trim();
+            if (!name || name === "候補を検索中…") {
                 alert("先に場所名を入力または選択してください．");
                 return;
             }
             if (rememberPlace(name, ev.lat, ev.lng)) {
-                alert("「" + name + "」を場所辞書に記憶しました．次回この付近では優先候補に表示します．");
+                renderEvents();
+                alert("「" + name + "」をよく使う場所に登録しました．");
+            } else {
+                alert("場所を保存できませんでした．ブラウザの保存設定や空き容量を確認してください．");
             }
         }
 
+        function selectEventSavedPlace(id, name) {
+            const ev = events.find(e => e.id === id);
+            const place = placeDictionary.find(item => item.name === name);
+            if (!ev || !place) return;
+            // 名称だけを再利用する。元記録のGPSと手修正した本文は保持する。
+            ev.location = place.name;
+            ev.locationMode = "manual";
+            renderEvents(); updatePreview(); saveDraft();
+        }
+
+        function deleteSavedPlace(name) {
+            const place = placeDictionary.find(item => item.name === name);
+            if (!place || !confirm("「" + place.name + "」をよく使う場所から削除しますか？\nイベントに入力済みの場所名は残ります．")) return;
+            const previous = placeDictionary;
+            placeDictionary = placeDictionary.filter(item => item.name !== name);
+            if (!savePlaceDictionary()) {
+                placeDictionary = previous;
+                alert("場所を削除できませんでした．ブラウザの保存設定を確認してください．");
+            }
+            renderEvents();
+        }
+
         function savedPlaceCandidates(lat, lng, radius = 100) {
-            return placeDictionary.map(item => ({
+            return placeDictionary.filter(placeHasCoordinates).map(item => ({
                 name: item.name, detail: "場所辞書", lat: item.lat, lng: item.lng,
                 distance: haversineMeters(lat, lng, item.lat, item.lng), source: "saved"
             })).filter(item => item.distance <= radius).sort((a,b) => a.distance - b.distance);
@@ -2672,16 +2725,31 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
                                         <option value="none" ${ev.locationMode==="none"?"selected":""}>場所を報告しない</option>
                                     </select>
 
+                                    <div class="mt-2">
+                                        <label for="saved-place-${ev.id}" class="block text-[11px] text-gray-500">よく使う場所</label>
+                                        <div class="flex flex-wrap gap-2 mt-1">
+                                            <select id="saved-place-${ev.id}" onchange="if(this.value) selectEventSavedPlace(${ev.id}, this.value)"
+                                                class="flex-1 min-w-0 border rounded p-2 text-sm bg-white" ${placeDictionary.length ? "" : "disabled"}>
+                                                <option value="">${placeDictionary.length ? "保存済みの場所を選択" : "登録済みの場所はありません"}</option>
+                                                ${placeDictionary.map(place => `<option value="${escapeHtml(place.name)}" ${place.name===eventDisplayLocation(ev)?"selected":""}>${escapeHtml(place.name)}</option>`).join("")}
+                                            </select>
+                                            <button onclick="deleteSavedPlace(document.getElementById('saved-place-${ev.id}').value)"
+                                                class="text-xs bg-red-50 border rounded px-3" ${placeDictionary.some(place => place.name===eventDisplayLocation(ev)) ? "" : "disabled"}>
+                                                選択した保存場所を削除
+                                            </button>
+                                        </div>
+                                        <p class="text-[11px] text-gray-500 mt-1">GPSがない記録でも場所名を使えます．削除は保存一覧だけに反映します．</p>
+                                    </div>
+
                                     ${(ev.locationMode||"manual")==="manual" ? `
                                     <div class="mt-2 flex flex-col sm:flex-row gap-2">
                                         <input value="${escapeHtml(ev.location || "")}"
-                                            onchange="updateEvent(${ev.id}, 'location', this.value); renderEvents()"
+                                            oninput="updateEvent(${ev.id}, 'location', this.value)"
                                             class="flex-1 border rounded p-2 text-sm" placeholder="観測点名・任意の場所名">
-                                        ${Number.isFinite(Number(ev.lat)) && Number.isFinite(Number(ev.lng)) && String(ev.location||"").trim() ? `
                                         <button onclick="rememberEventLocation(${ev.id})"
                                             class="text-xs border border-blue-200 rounded px-3 bg-blue-50 text-blue-800 hover:bg-blue-100">
-                                            この場所名を記憶
-                                        </button>` : ""}
+                                            よく使う場所に登録
+                                        </button>
                                     </div>` : ""}
 
                                     ${ev.locationMode==="auto" ? `
@@ -2702,7 +2770,7 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
                                     ${ev.autoLocationFull && ev.autoLocationFull !== ev.autoLocation ? `<div class="text-[10px] text-gray-400 mt-1">${escapeHtml(ev.autoLocationFull)}</div>` : ""}
                                     ${String(ev.autoLocation||"").trim() && ev.autoLocation!=="候補を検索中…" ? `
                                     <button onclick="rememberEventLocation(${ev.id})"
-                                        class="mt-2 text-[11px] text-blue-700 hover:underline">この場所名を場所辞書に記憶</button>` : ""}` : ""}
+                                        class="mt-2 text-[11px] text-blue-700 hover:underline">よく使う場所に登録</button>` : ""}` : ""}
                                     ${ev.locationMode==="coords" ? `
                                     <div class="mt-2 border rounded p-2 font-mono text-sm bg-gray-50">${escapeHtml(eventCoordsText(ev) || "位置情報なし")}</div>
                                     <div class="text-[10px] text-gray-400 mt-1">緯度経度は報告本文には出しません。</div>` : ""}
@@ -3667,8 +3735,9 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
             window.open(url, '_blank');
         }
 
-        const STORAGE_KEY = "eri_trip_report_pc_v0620";
+        const STORAGE_KEY = "eri_trip_report_pc_v0621";
         const LEGACY_STORAGE_KEYS = [
+            "eri_trip_report_pc_v0620",
             "eri_trip_report_pc_v0616",
             "eri_trip_report_pc_v0615",
             "eri_trip_report_pc_v0614",
