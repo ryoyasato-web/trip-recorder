@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>出張メール・報告ジェネレーター PC v0.6.16 (ERI 総合観測室向け)</title>
+    <title>出張メール・報告ジェネレーター PC v0.6.17 (ERI 総合観測室向け)</title>
     <!-- Tailwind CSS for styling -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- EXIF.js for reading image metadata -->
@@ -27,14 +27,61 @@
         ::-webkit-scrollbar-track { background: #f1f1f1; }
         ::-webkit-scrollbar-thumb { background: #c1c1c1; border-radius: 4px; }
         ::-webkit-scrollbar-thumb:hover { background: #a8a8a8; }
-    </style>
+    
+/* Trip Recorder UI: adapted from Digital Agency Design System principles.
+   References: https://design.digital.go.jp/dads/foundations/typography/
+   https://design.digital.go.jp/dads/components/button/
+   Local adaptation, not a claim of full DADS or WCAG conformance. */
+:root{--ui-blue:#0017c1;--ui-blue-hover:#000082;--ui-ink:#1a1a1a;--ui-muted:#595959;--ui-line:#b3b3b3;--ui-surface:#f5f5f5;--ui-focus:#ffbe00}
+body{font-family:"Noto Sans JP","Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,system-ui,sans-serif;font-size:16px;line-height:1.7;color:var(--ui-ink)}
+button,input,textarea,select{font-family:inherit}
+button,summary{touch-action:manipulation}
+button{min-height:44px;border-radius:8px;font-size:16px;line-height:1.5;font-weight:700;cursor:pointer;white-space:normal}
+button:disabled{cursor:default;opacity:.55}
+input:not([type=checkbox]):not([type=radio]):not([type=file]),textarea,select{font-size:16px;line-height:1.5;border:1px solid var(--ui-muted);border-radius:8px;padding:12px;background:#fff;color:var(--ui-ink)}
+input[type=checkbox],input[type=radio]{accent-color:var(--ui-blue)}
+input::placeholder,textarea::placeholder{color:var(--ui-muted);opacity:1}
+:where(button,a,input,textarea,select,summary,[tabindex]):focus-visible{outline:3px solid var(--ui-ink)!important;outline-offset:3px;box-shadow:0 0 0 3px var(--ui-focus)!important}
+a{color:var(--ui-blue);text-decoration:underline;text-underline-offset:.2em}
+details{border-color:var(--ui-line);border-radius:8px}
+summary{min-height:44px;padding:12px 16px;font-size:16px!important;line-height:1.7;color:var(--ui-blue)}
+summary:hover{text-decoration:underline;text-underline-offset:.2em}
+h1,h2,h3{line-height:1.5;font-weight:700;overflow-wrap:anywhere}
+.field-label{display:block;font-size:16px;font-weight:700;margin-top:16px;margin-bottom:8px}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+
+body{background:var(--ui-surface)}
+body>header{background:#fff;color:var(--ui-ink);border-bottom:2px solid var(--ui-blue);box-shadow:none;gap:16px;flex-wrap:wrap;padding:20px 24px}
+body>header .text-blue-200{color:var(--ui-muted)}body>header>div:last-child{flex-wrap:wrap}
+body>header button{background:#fff;color:var(--ui-blue);border:1px solid var(--ui-blue);padding:10px 16px}
+.text-xs,.text-\[11px\],.text-\[10px\]{font-size:14px;line-height:1.7}
+.text-sm{font-size:16px;line-height:1.7}
+.text-gray-400,.text-gray-500,.text-gray-600{color:var(--ui-muted)}
+button[class*="bg-blue-"],button[class*="bg-indigo-"],button[class*="bg-amber-600"],button[class*="bg-sky-700"]{background:var(--ui-blue);color:#fff;border:1px solid var(--ui-blue);box-shadow:none;padding:10px 16px}
+button[class*="bg-blue-100"],button[class*="bg-blue-50"],button[class*="bg-white"],button[class*="bg-gray-100"]{background:#fff;color:var(--ui-blue);border:1px solid var(--ui-blue);box-shadow:none}
+button[class*="bg-red-"]{background:#fff;color:#b00020;border:1px solid #b00020;box-shadow:none}
+button[class*="bg-blue-"]:hover,button[class*="bg-indigo-"]:hover,button[class*="bg-sky-700"]:hover{background:var(--ui-blue-hover)}
+button[class*="bg-white"]:hover,button[class*="bg-gray-100"]:hover,button[class*="bg-blue-100"]:hover{background:#e8f1fe}
+#tab-plan,#tab-report{background:#fff;border-width:0 0 4px;border-radius:0;padding:16px;color:var(--ui-muted)}
+#tab-plan.text-blue-600,#tab-report.text-blue-600{color:var(--ui-blue);border-color:var(--ui-blue)}
+#editor-main>div{padding:24px;min-width:0;scroll-padding:24px}
+#editor-main section{margin-bottom:32px}
+#editor-main h2{font-size:20px;gap:16px;flex-wrap:wrap}
+#editor-main [class*="rounded"]{border-radius:8px}
+#auto-organize-section>div:nth-child(2){background:#e8f1fe;border-color:#b3c8ee;padding:20px}
+#preview-text{line-height:1.7;min-height:240px;box-shadow:none}
+#editor-main label{color:var(--ui-ink)}
+@media(max-width:1023px){body{height:auto!important;min-height:100dvh;overflow:auto!important}#editor-main{flex-direction:column;overflow:visible}#editor-main>div{width:100%;height:auto;overflow:visible}#preview-text{min-height:440px}body>header{padding:16px}#archive-view{overflow:auto}}
+@media(max-width:480px){#editor-main>div{padding:16px}#editor-main .flex.gap-3{flex-wrap:wrap}#editor-main h2{align-items:flex-start}body>header>div:last-child{gap:8px}}
+
+</style>
 <script src="https://cdn.jsdelivr.net/npm/dropbox@10.46.0/dist/Dropbox-sdk.min.js"></script>
 </head>
 <body class="text-gray-800 h-screen flex flex-col overflow-hidden">
 
     <header class="bg-blue-800 text-white p-4 shadow-md flex-shrink-0 flex justify-between items-center">
         <div>
-            <h1 class="text-xl font-bold">出張メール・報告ジェネレーター <span class="text-sm font-normal text-blue-200">PC v0.6.16</span></h1>
+            <h1 class="text-xl font-bold">出張メール・報告ジェネレーター <span class="text-sm font-normal text-blue-200">PC v0.6.17</span></h1>
             <p class="text-xs text-blue-200">現場記録を長期保存し、出張報告まで一元管理</p>
         </div>
         <div class="flex items-center gap-3">
@@ -320,14 +367,14 @@
                                 <summary class="cursor-pointer px-3 py-2 text-xs font-bold text-gray-700">詳細設定</summary>
                                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 items-end p-3 pt-1">
                                     <div>
-                                        <label class="text-xs font-bold text-gray-700 block mb-1">同じ作業とみなす時間</label>
+                                        <label for="merge-minutes" class="text-xs font-bold text-gray-700 block mb-1">同じ作業とみなす時間</label>
                                         <div class="flex items-center gap-1">
                                             <input id="merge-minutes" type="number" min="1" max="180" value="30" class="w-full border rounded-lg p-2 text-sm bg-white">
                                             <span class="text-xs text-gray-500">分</span>
                                         </div>
                                     </div>
                                     <div>
-                                        <label class="text-xs font-bold text-gray-700 block mb-1">同じ場所とみなす距離</label>
+                                        <label for="merge-distance" class="text-xs font-bold text-gray-700 block mb-1">同じ場所とみなす距離</label>
                                         <div class="flex items-center gap-1">
                                             <input id="merge-distance" type="number" min="10" max="10000" value="500" class="w-full border rounded-lg p-2 text-sm bg-white">
                                             <span class="text-xs text-gray-500">m</span>
@@ -374,10 +421,10 @@
             </h2>
             
             <div class="mb-3">
-                <label class="text-xs text-gray-500 block mb-1">件名</label>
+                <label for="subject-text" class="text-xs text-gray-500 block mb-1">件名</label>
                 <input id="subject-text" type="text" class="w-full p-2 border border-gray-200 rounded bg-white text-sm focus:outline-none focus:ring-1 focus:ring-blue-400" oninput="this.dataset.userEdited='1'; saveDraft()">
             </div>
-            <textarea id="preview-text" class="flex-1 w-full p-4 border border-gray-200 rounded shadow-inner bg-white font-mono text-sm resize-none focus:outline-none focus:ring-1 focus:ring-blue-400" readonly></textarea>
+            <textarea aria-label="報告文の出力プレビュー" id="preview-text" class="flex-1 w-full p-4 border border-gray-200 rounded shadow-inner bg-white font-mono text-sm resize-none focus:outline-none focus:ring-1 focus:ring-blue-400" readonly></textarea>
             
             <div class="mt-4 flex gap-3 flex-shrink-0">
                 <button onclick="copyToClipboard()" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded shadow flex justify-center items-center gap-2 transition-colors">
