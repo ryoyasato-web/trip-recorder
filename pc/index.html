@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>出張メール・報告ジェネレーター PC v0.6.23 (ERI 総合観測室向け)</title>
+    <title>出張メール・報告ジェネレーター PC v0.6.24 (ERI 総合観測室向け)</title>
     <!-- Tailwind CSS for styling -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- EXIF.js for reading image metadata -->
@@ -132,11 +132,13 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
 
     <header class="bg-blue-800 text-white p-4 shadow-md flex-shrink-0 flex justify-between items-center">
         <div>
-            <h1 class="text-xl font-bold">出張メール・報告ジェネレーター <span class="text-sm font-normal text-blue-200">PC v0.6.23</span></h1>
+            <h1 class="text-xl font-bold">出張メール・報告ジェネレーター <span class="text-sm font-normal text-blue-200">PC v0.6.24</span></h1>
             <p class="text-xs text-blue-200">現場記録を長期保存し、出張報告まで一元管理</p>
         </div>
         <div class="flex items-center gap-3">
             <span id="save-status" class="text-xs text-blue-200">自動保存: ON</span>
+            <button id="undo-draft" onclick="undoDraft()" disabled class="text-xs px-3 py-1 rounded">戻る</button>
+            <button onclick="repairDuplicateLogs()" class="text-xs px-3 py-1 rounded">重複を整理</button>
             <button onclick="openArchiveView()" class="text-xs bg-indigo-700 hover:bg-indigo-600 border border-indigo-400 px-3 py-1 rounded">記録アーカイブ</button>
             <button onclick="resetAll()" class="text-xs bg-blue-700 hover:bg-blue-600 border border-blue-500 px-3 py-1 rounded">新規作成</button>
             <div class="text-sm hidden lg:block">東大地震研 技術部 総合観測室</div>
@@ -1144,9 +1146,7 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
                     data = JSON.parse(await file.text());
                 }
 
-                const imported = fieldRecordsToLogs(data, "field-package");
-
-                logs.push(...imported);
+                const imported = appendUniqueImportedLogs(fieldRecordsToLogs(data, "field-package"));
                 sortLogs();
                 renderLogs();
 
@@ -1518,7 +1518,7 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
 
             const pLoc = String(photoRec.location || "").trim();
             const mLoc = String(manualRec.location || "").trim();
-            if (pLoc && mLoc && pLoc === mLoc) return true;
+            if (pLoc && mLoc) return pLoc === mLoc;
 
             const dist = rawRecordDistanceMeters(photoRec, manualRec);
             if (dist !== null) return dist <= 150;
@@ -1608,6 +1608,81 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
             if (merged.length) return merged.map(String).sort().join("+");
             return String(rec?.uid||rec?.createdAt||`${rec?.time||"unknown"}#${rec?.id??index}`);
         }
+
+        function logSourceUids(log) {
+            return [...new Set((Array.isArray(log.sourceSyncIds) && log.sourceSyncIds.length
+                ? log.sourceSyncIds : [log.sourceSyncId]).filter(Boolean).map(String))].sort();
+        }
+
+        function recordSourceUids(rec) {
+            return [...new Set((Array.isArray(rec._mergedUids) && rec._mergedUids.length
+                ? rec._mergedUids : [rec.uid]).filter(Boolean).map(String))].sort();
+        }
+
+        function recordAlreadyImported(rec) {
+            const uids = recordSourceUids(rec);
+            if (uids.length) {
+                const imported = new Set(logs.flatMap(logSourceUids));
+                return uids.every(uid => imported.has(uid));
+            }
+            return logs.some(log => log.sourceGroupKey === rawRecordPickerKey(rec));
+        }
+
+        function importedLogFingerprint(log) {
+            return JSON.stringify([log.time || "", log.location || "", log.lat ?? null,
+                log.lng ?? null, String(log.task || "").trim(), log.sourceFile || ""]);
+        }
+
+        function appendUniqueImportedLogs(imported) {
+            const added = [];
+            const knownUids = new Set(logs.flatMap(logSourceUids));
+            for (const log of imported) {
+                const uids = logSourceUids(log);
+                if (uids.length && uids.every(uid => knownUids.has(uid))) continue;
+                if (!uids.length && logs.some(old => importedLogFingerprint(old) === importedLogFingerprint(log))) continue;
+                logs.push(log);
+                added.push(log);
+                uids.forEach(uid => knownUids.add(uid));
+            }
+            return added;
+        }
+
+        function repairDuplicateLogs() {
+            const kept = [];
+            const remapped = new Map();
+            for (const log of logs) {
+                const uids = logSourceUids(log);
+                const target = kept.find(old => {
+                    const oldUids = logSourceUids(old);
+                    return uids.length && oldUids.length
+                        ? JSON.stringify(uids) === JSON.stringify(oldUids) ||
+                          (uids.some(uid => oldUids.includes(uid)) &&
+                           String(log.location || "").trim() === String(old.location || "").trim() &&
+                           Math.abs(parseLogDate(log.time) - parseLogDate(old.time)) <= 5 * 60 * 1000)
+                        : !uids.length && !oldUids.length && log.sourceType !== "manual" &&
+                          old.sourceType !== "manual" && importedLogFingerprint(old) === importedLogFingerprint(log);
+                });
+                if (!target) { kept.push({...log}); continue; }
+                // 内容に違いがある重複も、メモは削らず両方の行を残す。
+                target.task = uniqueNonEmpty([...splitTasks(target), ...splitTasks(log)]).join("\n");
+                target.sourceSyncIds = [...new Set([...logSourceUids(target), ...uids])].sort();
+                if (target.sourceSyncIds.length) target.sourceGroupKey = target.sourceSyncIds.join("+");
+                target.photoCount = Math.max(Number(target.photoCount) || 0, Number(log.photoCount) || 0);
+                target.sourceRecordIds = [...new Set([...(target.sourceRecordIds || []), ...(log.sourceRecordIds || [])])];
+                if (log.keepReportTime === true) target.keepReportTime = true;
+                remapped.set(String(log.id), target.id);
+            }
+            if (!remapped.size) { alert("同じ元記録の重複は見つかりませんでした．"); return; }
+            logs = kept;
+            events.forEach(ev => {
+                ev.sourceLogIds = [...new Set((ev.sourceLogIds || []).map(id => remapped.get(String(id)) ?? id))];
+            });
+            buildEventsFromLogs(false);
+            renderLogs();
+            saveDraft();
+            alert(remapped.size + "件の重複を整理しました．メモは残しています．「戻る」で取り消せます．");
+        }
+
         function importedDropboxKeys(){
             return new Set(logs.filter(l=>l.sourceType==="dropbox").map(l=>String(l.sourceGroupKey||l.sourceSyncId||l.time||l.id)));
         }
@@ -1645,10 +1720,9 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
                 return;
             }
 
-            const alreadyImported = importedDropboxKeys();
             rows.forEach(({rec,index,inRange})=>{
                 const key=rawRecordPickerKey(rec,index);
-                const isImported=alreadyImported.has(key);
+                const isImported=recordAlreadyImported(rec);
                 const defaultChecked=isImported || (inRange&&!excludedDropboxSyncIds.has(key));
                 const actions=Array.isArray(rec.actions)?rec.actions.join(" / "):"";
                 const photos=Array.isArray(rec.photos)?rec.photos.length:(Number(rec.photoCount)||0);
@@ -1694,10 +1768,9 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
                     .map(cb=>[cb.dataset.key,cb.checked])
             );
 
-            const existingKeys=importedDropboxKeys();
             const recordsToAdd=pendingDropboxRecords.filter((rec,index)=>{
                 const key=rawRecordPickerKey(rec,index);
-                return !existingKeys.has(key) && checkboxMap.get(key)===true;
+                return !recordAlreadyImported(rec) && checkboxMap.get(key)===true;
             });
 
             // 今回明示的に追加したものは、以前の除外指定があれば解除する。
@@ -1705,9 +1778,16 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
                 excludedDropboxSyncIds.delete(rawRecordPickerKey(rec,index));
             });
 
-            const imported=fieldRecordsToLogs({records:recordsToAdd},"dropbox");
+            const importedUids = new Set(logs.flatMap(logSourceUids));
+            const rawByUid = new Map(currentDropboxRawRecords.filter(rec => rec.uid).map(rec => [String(rec.uid), rec]));
+            const freshRecords = recordsToAdd.flatMap(rec => {
+                const uids = recordSourceUids(rec);
+                if (!uids.some(uid => importedUids.has(uid))) return [rec];
+                // 統合の組み合わせが変わっても、未取り込みの構成記録だけ追加する。
+                return uids.filter(uid => !importedUids.has(uid)).map(uid => rawByUid.get(uid)).filter(Boolean);
+            });
+            const imported=appendUniqueImportedLogs(fieldRecordsToLogs({records:freshRecords},"dropbox"));
             selectedDropboxLogIds.clear();
-            logs.push(...imported);
             sortLogs();
             renderLogs();
             buildEventsFromLogs(false);
@@ -2059,7 +2139,7 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
         function locationsCompatible(a, b, distanceLimit) {
             const la = normalizedLocation(a);
             const lb = normalizedLocation(b);
-            if (la && lb && la === lb) return true;
+            if (la && lb) return la === lb;
 
             if (a.lat !== null && a.lat !== undefined && a.lng !== null && a.lng !== undefined &&
                 b.lat !== null && b.lat !== undefined && b.lng !== null && b.lng !== undefined) {
@@ -2503,22 +2583,25 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
         }
 
         function eventTimedLines(event, prose = "") {
-            const existingLines = String(prose).split("\n").map(line => line.trim());
-            return eventSourceLogs(event)
-                .filter(sourceTimeIsKept)
+            const existing = String(prose).trim();
+            return eventSourceLogs(event).filter(sourceTimeIsKept)
                 .sort((a, b) => String(a.time).localeCompare(String(b.time)))
-                .flatMap(log => {
+                .map(log => {
                     const time = String(log.time || "").match(/(?:^|\s)(\d{1,2}:\d{2})/);
-                    if (!time) return [];
-                    return splitTasks(log).filter(task => task !== "写真記録" && !/^写真撮影時刻：/.test(task))
-                        .map(task => {
-                            const phrase = /^(観測点到着|到着)$/.test(task) ? "到着"
-                                : /^(移動開始|出発)$/.test(task) ? "出発"
-                                : /^(作業終了|撤収)$/.test(task) ? task : actionPhrase(task);
-                            return phrase ? time[1] + "　" + formatReportFragment(phrase) : "";
-                        })
-                        .filter(line => line && !existingLines.includes(line));
-                });
+                    if (!time) return "";
+                    const rawPlace = String(log.location || "").trim();
+                    const place = event.locationMode === "none" ? "" :
+                        (rawPlace && !/^-?\d+(?:\.\d+)?,\s*-?\d+(?:\.\d+)?$/.test(rawPlace)
+                            ? rawPlace : eventReportLocation(event));
+                    const content = splitTasks(log)
+                        .filter(task => task !== "写真記録" && !/^写真撮影時刻：/.test(task))
+                        .map(task => /^(観測点到着|到着)$/.test(task) ? "到着"
+                            : /^(移動開始|出発)$/.test(task) ? "出発" : actionPhrase(task))
+                        .filter(Boolean).map(formatReportFragment).join("\n");
+                    if (!content) return "";
+                    const block = time[1] + (place ? "　" + place : "") + "\n" + content;
+                    return existing.includes(block) ? "" : block;
+                }).filter(Boolean);
         }
 
         function generateEventProse(event) {
@@ -2628,6 +2711,8 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
             if (!sourceLogs.length) {
                 events = [];
                 renderEvents();
+                updatePreview();
+                saveDraft();
                 if (userInitiated) alert("日時のあるログがありません。");
                 return;
             }
@@ -2656,8 +2741,18 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
                 }
             }
 
-            const reusedEditedEvents = new Set();
-            events = groups.map(group => {
+            // 手修正文は元記録の重なりが最大の新イベント1件にだけ引き継ぐ。
+            const editedByGroup = new Map();
+            previousEvents.filter(eventProseWasEdited).forEach(previous => {
+                const ids = new Set((previous.sourceLogIds || []).map(String));
+                let best = -1, overlap = 0;
+                groups.forEach((group, index) => {
+                    const count = group.filter(log => ids.has(String(log.id))).length;
+                    if (count > overlap) { overlap = count; best = index; }
+                });
+                if (best >= 0) editedByGroup.set(best, [...(editedByGroup.get(best) || []), previous]);
+            });
+            events = groups.map((group, groupIndex) => {
                 const coords = eventCoordsFromLogs(group);
                 const start = group[0]._date;
                 const end = group[group.length - 1]._date;
@@ -2665,11 +2760,7 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
                 const photoCount = group.reduce((sum,l) => sum + (Number(l.photoCount) || 0), 0);
                 const sourceLogIds = group.map(l => l.id);
                 const sourceKey = sourceLogIds.map(Number).filter(Number.isFinite).sort((a,b)=>a-b).join(",");
-                const previous = previousBySource.get(sourceKey) || previousEvents.find(ev =>
-                    eventProseWasEdited(ev) && !reusedEditedEvents.has(ev) &&
-                    sourceLogIds.every(id => (ev.sourceLogIds || []).some(oldId => String(oldId) === String(id)))
-                ) || null;
-                if (previous) reusedEditedEvents.add(previous);
+                const previous = previousBySource.get(sourceKey) || null;
 
                 const event = {
                     id: previous?.id ?? eventIdCounter++,
@@ -2703,9 +2794,9 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
                     event.autoLocationFull = previous.autoLocationFull || "";
                 }
 
-                const wasEdited = previous ? eventProseWasEdited(previous) : false;
-                if (previous && wasEdited) {
-                    event.prose = stripLegacyEventHeaderFromProse(previous, previous.prose);
+                const editedSources = editedByGroup.get(groupIndex) || [];
+                if (editedSources.length) {
+                    event.prose = uniqueNonEmpty(editedSources.map(old => stripLegacyEventHeaderFromProse(old, old.prose))).join("\n");
                     event.proseEdited = true;
                 } else {
                     event.prose = generateEventProse(event);
@@ -2863,20 +2954,21 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
                             <div class="mt-2">
                                 <div class="flex items-center justify-between gap-2">
                                     <div class="flex items-center gap-2">
-                                        <label class="text-[11px] text-gray-500">報告文（自由に修正可）</label>
+                                        <label class="text-[11px] text-gray-500">まとめ本文（自由に修正可）</label>
                                         ${ev.proseEdited ? '<span class="text-[10px] bg-amber-100 text-amber-800 rounded px-1.5 py-0.5">手修正を保持</span>' : ""}
                                     </div>
                                     <button onclick="regenerateEventProse(${ev.id})" class="text-[11px] text-indigo-700 hover:underline">文を再生成</button>
                                 </div>
                                 <textarea oninput="updateEvent(${ev.id}, 'prose', this.value)"
-                                    class="w-full border rounded p-2 text-sm min-h-[80px] bg-indigo-50/40">${escapeHtml(ev.prose || "")}</textarea>
+                                    class="w-full border rounded p-2 text-sm min-h-[80px] bg-indigo-50/40" placeholder="時刻を残す記録の内容は下の欄に表示します．">${escapeHtml(ev.prose || "")}</textarea>
+                                ${eventTimedLines(ev).length ? `<div class="mt-2 border rounded p-2 bg-blue-50"><p class="text-xs font-bold">時刻を残す記録（元記録の内容）</p><pre class="whitespace-pre-wrap text-sm">${escapeHtml(eventTimedLines(ev).join("\n\n"))}</pre><p class="text-xs">内容の修正は「元の現場記録」で行えます．</p></div>` : ""}
                             </div>
                             ${ev.photoCount ? `<button onclick="showPackagePhotosForEvent(${ev.id})"
                                 class="mt-2 text-xs bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 px-2 py-1 rounded">
                                 📷 写真を確認（${ev.photoCount}枚）
                             </button>` : ""}
                         </div>
-                        <button onclick="removeEvent(${ev.id})" class="text-gray-300 hover:text-red-500 text-lg" title="このイベントを出力から除外">×</button>
+                        <button onclick="removeEvent(${ev.id})" class="text-gray-300 hover:text-red-500 text-sm" title="報告から外すだけで元記録は残ります">報告から外す</button>
                     </div>`;
                 eventsContainer.appendChild(el);
             });
@@ -3557,6 +3649,7 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
             if (log) {
                 log[field] = value;
                 if(field === 'time') sortLogs(); // 時間が手修正されたら再ソート
+                if (events.length) buildEventsFromLogs(false);
                 updatePreview();
                 saveDraft();
             }
@@ -3722,7 +3815,14 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
 
                             const prose = stripLegacyEventHeaderFromProse(ev, ev.prose || "").trim();
                             if (prose) reportText += `${prose}\n`;
-                            eventTimedLines(ev, prose).forEach(line => reportText += `${line}\n`);
+                            const heading = range + (displayLocation ? "　" + displayLocation : "");
+                            eventTimedLines(ev, prose).forEach((block, index) => {
+                                // 1件だけのイベントで同じ時刻・場所を連続して出さない。
+                                if (!prose && index === 0 && block.split("\n")[0] === heading) {
+                                    block = block.split("\n").slice(1).join("\n");
+                                }
+                                reportText += `${block}\n`;
+                            });
 
                             // 同じ日の別記録も見分けやすいよう、記録間に1行空ける。
                             if (eventIndex < dayEvents.length - 1) reportText += "\n";
@@ -3807,8 +3907,9 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
             window.open(url, '_blank');
         }
 
-        const STORAGE_KEY = "eri_trip_report_pc_v0623";
+        const STORAGE_KEY = "eri_trip_report_pc_v0624";
         const LEGACY_STORAGE_KEYS = [
+            "eri_trip_report_pc_v0623",
             "eri_trip_report_pc_v0622",
             "eri_trip_report_pc_v0621",
             "eri_trip_report_pc_v0620",
@@ -3835,6 +3936,60 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
             "eri_trip_report_generator_v04",
             "eri_trip_report_generator_v02"
         ];
+
+
+        const UNDO_STORAGE_KEY = STORAGE_KEY + "_undo";
+        let restoringDraft = false;
+
+        function draftUndoHistory() {
+            try {
+                const history = JSON.parse(localStorage.getItem(UNDO_STORAGE_KEY) || "[]");
+                return Array.isArray(history) ? history.filter(raw => typeof raw === "string").slice(-20) : [];
+            } catch (e) { return []; }
+        }
+
+        function refreshUndoButton() {
+            const button = document.getElementById("undo-draft");
+            if (button) button.disabled = !draftUndoHistory().length;
+        }
+
+        function rememberDraftForUndo(raw) {
+            if (!raw || restoringDraft) return;
+            try {
+                const history = draftUndoHistory();
+                if (history[history.length - 1] !== raw) history.push(raw);
+                localStorage.setItem(UNDO_STORAGE_KEY, JSON.stringify(history.slice(-20)));
+            } catch (e) { console.warn("操作履歴を保存できません", e); }
+        }
+
+        function undoDraft() {
+            const history = draftUndoHistory();
+            if (!history.length) return;
+            const raw = history.pop();
+            restoringDraft = true;
+            try {
+                // 保存に失敗した場合は現在の画面を変更しない。
+                localStorage.setItem(STORAGE_KEY, raw);
+                localStorage.setItem(UNDO_STORAGE_KEY, JSON.stringify(history));
+                selectedDropboxLogIds.clear();
+                delete subjectText.dataset.userEdited;
+                loadDraft();
+                renderBasicFields();
+                switchMode(currentMode);
+                validateBasicInfo();
+                renderLogs();
+                renderEvents();
+                updatePreview();
+                saveDraft();
+                saveStatus.textContent = "1つ前の操作に戻しました";
+            } catch (e) {
+                console.warn("操作を戻せません", e);
+                alert("操作を戻せませんでした．保存領域を確認してください．");
+            } finally {
+                restoringDraft = false;
+                refreshUndoButton();
+            }
+        }
 
         function saveDraft() {
             const data = {
@@ -3863,7 +4018,11 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
             };
 
             try {
-                localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+                const raw = JSON.stringify(data);
+                const previous = localStorage.getItem(STORAGE_KEY);
+                if (previous && previous !== raw) rememberDraftForUndo(previous);
+                localStorage.setItem(STORAGE_KEY, raw);
+                refreshUndoButton();
                 saveStatus.textContent = "自動保存: 保存済み";
                 clearTimeout(window.__saveStatusTimer);
                 window.__saveStatusTimer = setTimeout(() => {
@@ -3945,6 +4104,13 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
                 manualTripDateEnd = typeof data.manualTripDateEnd === "string" ? data.manualTripDateEnd : "";
                 if (Array.isArray(data.excludedDropboxSyncIds)) excludedDropboxSyncIds = new Set(data.excludedDropboxSyncIds.map(String));
                 if (data.mode === "plan" || data.mode === "report") currentMode = data.mode;
+                // 旧版の下書きも最初の変更前に戻せるようにする。
+                if (!localStorage.getItem(STORAGE_KEY)) localStorage.setItem(STORAGE_KEY, raw);
+                const maxLogId = logs.reduce((max, log) => Math.max(max, Number(log.id) || 0), -1);
+                logIdCounter = Math.max(logIdCounter, maxLogId + 1);
+                const maxEventId = events.reduce((max, ev) => Math.max(max, Number(ev.id) || 0), -1);
+                eventIdCounter = Math.max(eventIdCounter, maxEventId + 1);
+                refreshUndoButton();
             } catch (e) {
                 console.warn("下書き読み込み失敗", e);
             }
@@ -3953,6 +4119,7 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
         function resetAll() {
             if (!confirm("現在の入力内容と活動ログを消して、新規作成しますか？")) return;
             try {
+                rememberDraftForUndo(localStorage.getItem(STORAGE_KEY));
                 localStorage.removeItem(STORAGE_KEY);
                 LEGACY_STORAGE_KEYS.forEach(key => localStorage.removeItem(key));
             } catch (e) {
