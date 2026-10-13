@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="現場記録">
-<title>出張現場記録 v0.7.1</title>
+<title>出張現場記録 v0.7.3</title>
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="apple-touch-icon" href="./icon-192.png">
 <script src="https://cdn.jsdelivr.net/npm/exif-js"></script>
@@ -83,6 +83,7 @@ input:focus,textarea:focus{border-color:#60a5fa;box-shadow:0 0 0 3px #dbeafe}
 .gallery-toolbar .secondary{margin:0}
 .gallery-select{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:#374151;margin-bottom:7px}
 .gallery-select input{width:auto}
+.gallery-date{display:flex;gap:8px;margin-bottom:8px}.gallery-date label{flex:1;min-width:0;font-size:12px;font-weight:700}.gallery-date input{display:block;margin-top:4px;min-width:0}.gallery-day{margin:16px 0 8px;font-size:14px}
 .gallery-item.selected{border-color:#2563eb;box-shadow:0 0 0 2px #dbeafe}
 </style>
 </head>
@@ -90,7 +91,7 @@ input:focus,textarea:focus{border-color:#60a5fa;box-shadow:0 0 0 3px #dbeafe}
 <header>
   <div class="header-row">
     <div>
-      <div class="title">出張現場記録 <span style="font-size:11px;font-weight:500;color:#bfdbfe">v0.7.2</span></div>
+      <div class="title">出張現場記録 <span style="font-size:11px;font-weight:500;color:#bfdbfe">v0.7.3</span></div>
       <div id="clock" class="sub"></div>
     </div>
     <div class="header-actions">
@@ -235,14 +236,23 @@ input:focus,textarea:focus{border-color:#60a5fa;box-shadow:0 0 0 3px #dbeafe}
     <div class="sheet-title"><span>写真一覧 <span id="gallery-count" class="meta"></span></span><button class="ghost" aria-label="写真一覧を閉じる" onclick="closePhotoGallery()">✕</button></div>
     <p class="meta">保存したい写真を選択し、選択分だけまとめてZIP保存できます。写真をタップすると拡大できます。</p>
     <div class="gallery-toolbar">
+      <div class="gallery-date">
+        <label>開始日<input id="gallery-start-date" type="date"></label>
+        <label>終了日<input id="gallery-end-date" type="date"></label>
+      </div>
       <div class="gallery-toolbar-row">
-        <button class="secondary" onclick="setAllGalleryPhotos(true)">全選択</button>
+        <button class="secondary" onclick="applyGalleryRange()">期間を適用</button>
+        <button class="secondary" onclick="showAllGalleryPhotos()">全写真を表示</button>
+      </div>
+      <p id="gallery-range-status" class="meta" aria-live="polite"></p>
+      <div class="gallery-toolbar-row">
+        <button class="secondary" onclick="setAllGalleryPhotos(true)">表示中の写真を全選択</button>
         <button class="secondary" onclick="setAllGalleryPhotos(false)">選択解除</button>
         <button id="gallery-save-selected" class="secondary" onclick="saveSelectedGalleryPhotos(this)" disabled>選択した写真を保存（ZIP）</button>
         <span id="gallery-selected-count" class="meta" style="margin:0">0枚選択</span>
       </div>
     </div>
-    <div id="photo-gallery-content" class="gallery-grid"></div>
+    <div id="photo-gallery-content"></div>
   </div>
 </div>
 
@@ -462,6 +472,8 @@ function closePhotoModal(){
 
 let gallerySession=0;
 let galleryItems=[];
+let galleryVisibleItems=[];
+let galleryRange=null;
 let gallerySelectedIds=new Set();
 
 function galleryPhotoTime(row,record){
@@ -488,7 +500,8 @@ function galleryItemKey(item,index){
 function updateGallerySelectionUI(){
   const selected=gallerySelectedIds.size;
   const count=$("gallery-selected-count"),button=$("gallery-save-selected");
-  if(count)count.textContent=`${selected}枚選択`;
+  const visibleSelected=galleryVisibleItems.filter(({item,index})=>gallerySelectedIds.has(galleryItemKey(item,index))).length;
+  if(count)count.textContent=`${selected}枚選択${selected>visibleSelected?`（表示外 ${selected-visibleSelected}枚を含む）`:""}`;
   if(button)button.disabled=selected===0;
   document.querySelectorAll("#photo-gallery-content .gallery-item").forEach(card=>{
     const key=card.dataset.galleryKey;
@@ -503,8 +516,8 @@ function toggleGalleryPhoto(key,checked){
   updateGallerySelectionUI();
 }
 function setAllGalleryPhotos(checked){
-  gallerySelectedIds.clear();
-  if(checked)galleryItems.forEach((item,index)=>gallerySelectedIds.add(galleryItemKey(item,index)));
+  if(checked)galleryVisibleItems.forEach(({item,index})=>gallerySelectedIds.add(galleryItemKey(item,index)));
+  else gallerySelectedIds.clear();
   updateGallerySelectionUI();
 }
 async function saveSelectedGalleryPhotos(button){
@@ -539,20 +552,51 @@ async function saveSelectedGalleryPhotos(button){
     updateGallerySelectionUI();
   }
 }
-async function openPhotoGallery(){
-  closePhotoGallery();
-  const session=gallerySession,content=$("photo-gallery-content");
-  $("photo-gallery").classList.add("open");content.textContent="写真を読み込み中…";
-  try{
-    const items=await allGalleryPhotos();
-    if(session!==gallerySession)return;
-    galleryItems=items;
-    gallerySelectedIds.clear();
-    content.innerHTML="";$("gallery-count").textContent=`${items.length}枚`;
-    updateGallerySelectionUI();
-    if(!items.length){content.textContent="この端末に保存された写真はありません。";return}
-    items.forEach(({row,record,time},index)=>{
-      const item=items[index],key=galleryItemKey(item,index);
+// Stored capture times are local wall-clock values. Use their date directly.
+function galleryPhotoDate(item){
+  const match=String(item.time||"").match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})(?=$|[ T])/);
+  if(!match)return "";
+  const year=Number(match[1]),month=Number(match[2]),day=Number(match[3]);
+  const date=new Date(0);date.setFullYear(year,month-1,day);date.setHours(0,0,0,0);
+  if(date.getFullYear()!==year||date.getMonth()!==month-1||date.getDate()!==day)return "";
+  return `${match[1]}-${match[2].padStart(2,"0")}-${match[3].padStart(2,"0")}`;
+}
+function applyGalleryRange(){
+  const start=$("gallery-start-date").value,end=$("gallery-end-date").value;
+  if(!start||!end){alert("開始日と終了日を選択してください。");return}
+  if(start>end){alert("終了日は開始日以降にしてください。");return}
+  galleryRange={start,end};
+  renderPhotoGallery();
+}
+function showAllGalleryPhotos(){
+  galleryRange=null;
+  renderPhotoGallery();
+}
+function renderPhotoGallery(){
+  const content=$("photo-gallery-content");
+  content.querySelectorAll("[data-url]").forEach(card=>URL.revokeObjectURL(card.dataset.url));
+  content.innerHTML="";
+  galleryVisibleItems=galleryItems.map((item,index)=>({item,index}))
+    .filter(({item})=>!galleryRange||(galleryPhotoDate(item)>=galleryRange.start&&galleryPhotoDate(item)<=galleryRange.end));
+  galleryVisibleItems.sort((a,b)=>galleryPhotoDate(b.item).localeCompare(galleryPhotoDate(a.item))||a.index-b.index);
+  $("gallery-count").textContent=`${galleryVisibleItems.length}枚 / 全${galleryItems.length}枚`;
+  $("gallery-range-status").textContent=galleryRange
+    ?`${galleryRange.start} ～ ${galleryRange.end} の写真を表示中`
+    :"全期間の写真を表示中（日付不明の写真を含む）";
+  if(!galleryVisibleItems.length)content.textContent=galleryItems.length
+    ?"この期間の写真はありません。期間を変更するか「全写真を表示」を選んでください。"
+    :"この端末に保存された写真はありません。";
+  let previousDate=null,grid;
+  galleryVisibleItems.forEach(({item,index})=>{
+    const day=galleryPhotoDate(item);
+    if(day!==previousDate){
+      previousDate=day;
+      const heading=document.createElement("h3");heading.className="gallery-day";
+      heading.textContent=day||"日付不明";
+      grid=document.createElement("div");grid.className="gallery-grid";
+      content.append(heading,grid);
+    }
+      const {row,record,time}=item,key=galleryItemKey(item,index);
       const card=document.createElement("div"),url=URL.createObjectURL(row.blob);
       card.className="gallery-item";card.dataset.url=url;card.dataset.galleryKey=key;
 
@@ -570,9 +614,25 @@ async function openPhotoGallery(){
       const save=document.createElement("button");save.className="secondary";save.textContent="端末に保存";save.onclick=()=>savePhotoToDevice(row,index);
       card.append(selectLabel,preview,meta,save);
       const share=photoShareButton(row,index);if(share)card.appendChild(share);
-      content.appendChild(card);
-    });
-    updateGallerySelectionUI();
+      grid.appendChild(card);
+
+  });
+  updateGallerySelectionUI();
+}
+async function openPhotoGallery(){
+  closePhotoGallery();
+  const session=gallerySession,content=$("photo-gallery-content");
+  $("photo-gallery").classList.add("open");content.textContent="写真を読み込み中…";
+  $("gallery-range-status").textContent="";
+  $("gallery-start-date").value="";$("gallery-end-date").value="";
+  try{
+    const items=await allGalleryPhotos();
+    if(session!==gallerySession)return;
+    galleryItems=items;
+    const latest=items.map(galleryPhotoDate).filter(Boolean).sort().pop();
+    galleryRange=latest?{start:latest,end:latest}:null;
+    $("gallery-start-date").value=latest||"";$("gallery-end-date").value=latest||"";
+    renderPhotoGallery();
   }catch(e){
     if(session!==gallerySession)return;
     console.error(e);content.textContent="写真一覧を読み込めませんでした。もう一度開いてください。";
@@ -592,6 +652,8 @@ function showGalleryPhoto(row,index){
 function closePhotoGallery(){
   gallerySession++;
   galleryItems=[];
+  galleryVisibleItems=[];
+  galleryRange=null;
   gallerySelectedIds.clear();
   const content=$("photo-gallery-content");
   content.querySelectorAll("[data-url]").forEach(card=>URL.revokeObjectURL(card.dataset.url));
