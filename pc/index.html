@@ -609,6 +609,9 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
         let manualTripDateEnd = "";
         let excludedDropboxSyncIds = new Set();
         let selectedDropboxLogIds = new Set();
+        const PLACE_DICTIONARY_KEY = "eri_trip_place_dictionary_v1";
+        let placeDictionary = [];
+        const eventLocationCandidates = new Map();
 
         // 基本情報は出張ごとに増減可能
         const defaultBasicFieldTemplates = [
@@ -2148,6 +2151,165 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
             return formatReportFragment(text);
         }
 
+        function loadPlaceDictionary() {
+            try {
+                const raw = JSON.parse(localStorage.getItem(PLACE_DICTIONARY_KEY) || "[]");
+                if (!Array.isArray(raw)) return [];
+                return raw.map(item => ({
+                    id: String(item && item.id || ""),
+                    name: String(item && item.name || "").trim(),
+                    lat: Number(item && item.lat),
+                    lng: Number(item && item.lng),
+                    updatedAt: String(item && item.updatedAt || "")
+                })).filter(item => item.name && Number.isFinite(item.lat) && Number.isFinite(item.lng));
+            } catch (e) {
+                console.warn("場所辞書を読み込めません", e);
+                return [];
+            }
+        }
+
+        function savePlaceDictionary() {
+            try {
+                localStorage.setItem(PLACE_DICTIONARY_KEY, JSON.stringify(placeDictionary.slice(0, 200)));
+            } catch (e) {
+                console.warn("場所辞書を保存できません", e);
+            }
+        }
+
+        function rememberPlace(name, lat, lng) {
+            const cleanName = String(name || "").trim();
+            const y = Number(lat), x = Number(lng);
+            if (!cleanName || !Number.isFinite(y) || !Number.isFinite(x)) return false;
+            const nearby = placeDictionary.find(item => item.name === cleanName && haversineMeters(item.lat, item.lng, y, x) <= 50);
+            const now = new Date().toISOString();
+            if (nearby) {
+                nearby.lat = y; nearby.lng = x; nearby.updatedAt = now;
+            } else {
+                placeDictionary.unshift({
+                    id: crypto.randomUUID ? crypto.randomUUID() : "place-" + Date.now() + "-" + Math.random().toString(36).slice(2),
+                    name: cleanName, lat: y, lng: x, updatedAt: now
+                });
+            }
+            placeDictionary.sort((a,b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
+            placeDictionary = placeDictionary.slice(0, 200);
+            savePlaceDictionary();
+            return true;
+        }
+
+        function rememberEventLocation(id) {
+            const ev = events.find(e => e.id === id);
+            if (!ev || !Number.isFinite(Number(ev.lat)) || !Number.isFinite(Number(ev.lng))) {
+                alert("この記録には位置情報がないため，場所名を記憶できません．");
+                return;
+            }
+            const name = ev.locationMode === "auto" ? ev.autoLocation : ev.location;
+            if (!String(name || "").trim()) {
+                alert("先に場所名を入力または選択してください．");
+                return;
+            }
+            if (rememberPlace(name, ev.lat, ev.lng)) {
+                alert("「" + name + "」を場所辞書に記憶しました．次回この付近では優先候補に表示します．");
+            }
+        }
+
+        function savedPlaceCandidates(lat, lng, radius = 100) {
+            return placeDictionary.map(item => ({
+                name: item.name, detail: "場所辞書", lat: item.lat, lng: item.lng,
+                distance: haversineMeters(lat, lng, item.lat, item.lng), source: "saved"
+            })).filter(item => item.distance <= radius).sort((a,b) => a.distance - b.distance);
+        }
+
+        function overpassCandidateType(tags) {
+            tags = tags || {};
+            const keys = ["building","amenity","office","university","school","tourism","shop","leisure","railway","man_made"];
+            const hit = keys.find(k => tags[k]);
+            return hit ? hit + "=" + tags[hit] : "OSM";
+        }
+
+        async function fetchOverpassLocationCandidates(lat, lng, radius = 100) {
+            const head = "[out:json][timeout:12];\n(";
+            const tail = "\n);\nout center tags;";
+            const filters = ["building","amenity","office","university","school","tourism","shop","leisure","railway","man_made"];
+            const lines = filters.map(key => "nwr(around:" + radius + "," + lat + "," + lng + ")[\"name\"][\"" + key + "\"];");
+            const q = head + "\n" + lines.join("\n") + tail;
+            const body = new URLSearchParams({ data: q });
+            const res = await fetch("https://overpass-api.de/api/interpreter", {
+                method: "POST",
+                headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+                body
+            });
+            if (!res.ok) throw new Error("Overpass HTTP " + res.status);
+            const data = await res.json();
+            const out = [];
+            for (const el of (data.elements || [])) {
+                const tags = el.tags || {};
+                const name = String(tags["name:ja"] || tags.name || "").trim();
+                const y = Number(el.lat !== undefined ? el.lat : el.center && el.center.lat);
+                const x = Number(el.lon !== undefined ? el.lon : el.center && el.center.lon);
+                if (!name || !Number.isFinite(y) || !Number.isFinite(x)) continue;
+                out.push({
+                    name, detail: overpassCandidateType(tags), lat: y, lng: x,
+                    distance: haversineMeters(lat, lng, y, x), source: "osm"
+                });
+            }
+            return out.sort((a,b) => a.distance - b.distance);
+        }
+
+        async function fetchNominatimLocationCandidate(lat, lng) {
+            const url = new URL("https://nominatim.openstreetmap.org/reverse");
+            url.searchParams.set("format", "jsonv2");
+            url.searchParams.set("lat", lat);
+            url.searchParams.set("lon", lng);
+            url.searchParams.set("zoom", "18");
+            url.searchParams.set("addressdetails", "1");
+            url.searchParams.set("namedetails", "1");
+            url.searchParams.set("accept-language", "ja");
+            const res = await fetch(url.toString(), { headers: { "Accept-Language": "ja" } });
+            if (!res.ok) throw new Error("Nominatim HTTP " + res.status);
+            const data = await res.json();
+            const a = data.address || {};
+            const explicitName = data.name || (data.namedetails && (data.namedetails["name:ja"] || data.namedetails.name)) ||
+                a.building || a.amenity || a.office || a.university || a.school || a.tourism || a.shop || a.leisure || a.railway || "";
+            const areaParts = [a.suburb || a.quarter || a.neighbourhood || "", a.city || a.town || a.village || a.municipality || ""].filter(Boolean);
+            let name = String(explicitName || "").trim();
+            if (!name) name = areaParts.join(" ");
+            if (!name && data.display_name) name = String(data.display_name).split(",").slice(0, 3).join(" ").trim();
+            if (!name) return null;
+            const y = Number(data.lat);
+            const x = Number(data.lon);
+            return {
+                name, detail: data.display_name || name,
+                lat: Number.isFinite(y) ? y : Number(lat),
+                lng: Number.isFinite(x) ? x : Number(lng),
+                distance: haversineMeters(lat, lng, Number.isFinite(y) ? y : lat, Number.isFinite(x) ? x : lng),
+                source: "nominatim"
+            };
+        }
+
+        function dedupeLocationCandidates(items) {
+            const seen = new Set();
+            return items.filter(item => {
+                const key = String(item && item.name || "").trim().toLowerCase();
+                if (!key || seen.has(key)) return false;
+                seen.add(key);
+                return true;
+            }).slice(0, 12);
+        }
+
+        function eventCandidateList(id) {
+            return eventLocationCandidates.get(Number(id)) || [];
+        }
+
+        function selectEventLocationCandidate(id, index) {
+            const ev = events.find(e => e.id === id);
+            const candidate = eventCandidateList(id)[Number(index)];
+            if (!ev || !candidate) return;
+            ev.autoLocation = candidate.name;
+            ev.autoLocationFull = candidate.detail || candidate.name;
+            ev.locationMode = "auto";
+            rememberPlace(candidate.name, ev.lat, ev.lng);
+            renderEvents(); updatePreview(); saveDraft();
+        }
         function eventCoordsText(event) {
             if (!Number.isFinite(Number(event?.lat)) || !Number.isFinite(Number(event?.lng))) return "";
             return `${Number(event.lat).toFixed(6)}, ${Number(event.lng).toFixed(6)}`;
@@ -2185,53 +2347,35 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
         async function lookupEventAutoLocation(id) {
             const ev = events.find(e => e.id === id);
             if (!ev || !Number.isFinite(Number(ev.lat)) || !Number.isFinite(Number(ev.lng))) {
-                alert("この記録には位置情報がありません。");
+                alert("この記録には位置情報がありません．");
                 return;
             }
             const previous = ev.autoLocation || "";
-            ev.autoLocation = "取得中…";
+            ev.autoLocation = "候補を検索中…";
+            eventLocationCandidates.delete(Number(id));
             renderEvents();
+            const lat = Number(ev.lat), lng = Number(ev.lng);
+            const saved = savedPlaceCandidates(lat, lng, 100);
             try {
-                const url = new URL("https://nominatim.openstreetmap.org/reverse");
-                url.searchParams.set("format", "jsonv2");
-                url.searchParams.set("lat", ev.lat);
-                url.searchParams.set("lon", ev.lng);
-                url.searchParams.set("zoom", "18");
-                url.searchParams.set("addressdetails", "1");
-                url.searchParams.set("namedetails", "1");
-                url.searchParams.set("accept-language", "ja");
-
-                const res = await fetch(url.toString(), { headers: { "Accept-Language": "ja" } });
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                const data = await res.json();
-                const a = data.address || {};
-                const explicitName =
-                    data.name ||
-                    data.namedetails?.name ||
-                    a.building || a.amenity || a.office || a.university || a.school ||
-                    a.tourism || a.shop || a.leisure || a.railway || "";
-
-                const areaParts = [
-                    a.suburb || a.quarter || a.neighbourhood || "",
-                    a.city || a.town || a.village || a.municipality || ""
-                ].filter(Boolean);
-
-                let label = String(explicitName || "").trim();
-                if (!label) label = areaParts.join(" ");
-                if (!label && data.display_name) label = String(data.display_name).split(",").slice(0, 3).join(" ").trim();
-                if (!label) throw new Error("地名を取得できませんでした");
-
-                ev.autoLocation = label;
-                ev.autoLocationFull = data.display_name || label;
+                const results = await Promise.allSettled([
+                    fetchOverpassLocationCandidates(lat, lng, 100),
+                    fetchNominatimLocationCandidate(lat, lng)
+                ]);
+                const osm = results[0].status === "fulfilled" ? results[0].value : [];
+                const nom = results[1].status === "fulfilled" && results[1].value ? [results[1].value] : [];
+                const candidates = dedupeLocationCandidates([].concat(saved, osm, nom));
+                if (!candidates.length) throw new Error("周辺の名前付き施設を取得できませんでした");
+                eventLocationCandidates.set(Number(id), candidates);
+                const first = candidates[0];
+                ev.autoLocation = first.name;
+                ev.autoLocationFull = first.detail || first.name;
                 ev.locationMode = "auto";
-                renderEvents();
-                updatePreview();
-                saveDraft();
+                renderEvents(); updatePreview(); saveDraft();
             } catch (e) {
                 console.error(e);
                 ev.autoLocation = previous;
                 renderEvents();
-                alert(`自動地名の取得に失敗しました：${e.message || e}`);
+                alert("場所候補の取得に失敗しました：" + (e.message || e));
             }
         }
 
@@ -3685,6 +3829,7 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
         }
 
         // 初期化
+        placeDictionary = loadPlaceDictionary();
         loadDraft();
         if (dropboxAppKeyInput) dropboxAppKeyInput.value = getDropboxAppKey();
         renderBasicFields();
