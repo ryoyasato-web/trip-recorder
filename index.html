@@ -78,13 +78,19 @@ input:focus,textarea:focus{border-color:#60a5fa;box-shadow:0 0 0 3px #dbeafe}
 .gallery-preview img{display:block;width:100%;height:160px;object-fit:cover;margin:0;border-radius:0}
 .gallery-item .meta{overflow-wrap:anywhere}
 .gallery-item .secondary{width:100%;margin-top:8px}
+.gallery-toolbar{position:sticky;top:0;z-index:2;background:#fff;border:1px solid var(--line);border-radius:12px;padding:8px;margin:8px 0 10px;box-shadow:0 2px 8px #0001}
+.gallery-toolbar-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.gallery-toolbar .secondary{margin:0}
+.gallery-select{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:700;color:#374151;margin-bottom:7px}
+.gallery-select input{width:auto}
+.gallery-item.selected{border-color:#2563eb;box-shadow:0 0 0 2px #dbeafe}
 </style>
 </head>
 <body>
 <header>
   <div class="header-row">
     <div>
-      <div class="title">出張現場記録 <span style="font-size:11px;font-weight:500;color:#bfdbfe">v0.7.1</span></div>
+      <div class="title">出張現場記録 <span style="font-size:11px;font-weight:500;color:#bfdbfe">v0.7.2</span></div>
       <div id="clock" class="sub"></div>
     </div>
     <div class="header-actions">
@@ -227,7 +233,15 @@ input:focus,textarea:focus{border-color:#60a5fa;box-shadow:0 0 0 3px #dbeafe}
 <div id="photo-gallery" class="modal" onclick="if(event.target===this)closePhotoGallery()">
   <div class="modal-card" role="dialog" aria-modal="true" aria-label="写真一覧">
     <div class="sheet-title"><span>写真一覧 <span id="gallery-count" class="meta"></span></span><button class="ghost" aria-label="写真一覧を閉じる" onclick="closePhotoGallery()">✕</button></div>
-    <p class="meta">この端末の写真を新しい順に表示します。写真をタップすると拡大できます。</p>
+    <p class="meta">保存したい写真を選択し、選択分だけまとめてZIP保存できます。写真をタップすると拡大できます。</p>
+    <div class="gallery-toolbar">
+      <div class="gallery-toolbar-row">
+        <button class="secondary" onclick="setAllGalleryPhotos(true)">全選択</button>
+        <button class="secondary" onclick="setAllGalleryPhotos(false)">選択解除</button>
+        <button id="gallery-save-selected" class="secondary" onclick="saveSelectedGalleryPhotos(this)" disabled>選択した写真を保存（ZIP）</button>
+        <span id="gallery-selected-count" class="meta" style="margin:0">0枚選択</span>
+      </div>
+    </div>
     <div id="photo-gallery-content" class="gallery-grid"></div>
   </div>
 </div>
@@ -447,6 +461,9 @@ function closePhotoModal(){
 
 
 let gallerySession=0;
+let galleryItems=[];
+let gallerySelectedIds=new Set();
+
 function galleryPhotoTime(row,record){
   const meta=(record.photos||[]).find(p=>p.name===row.name);
   return String(meta?.takenAt||record.time||record.createdAt||"");
@@ -465,6 +482,63 @@ async function allGalleryPhotos(){
       .sort((a,b)=>b.time.localeCompare(a.time)||String(b.row.id).localeCompare(String(a.row.id),undefined,{numeric:true}));
   }finally{db.close()}
 }
+function galleryItemKey(item,index){
+  return String(item?.row?.id||`${item?.record?.id??"record"}_${index}`);
+}
+function updateGallerySelectionUI(){
+  const selected=gallerySelectedIds.size;
+  const count=$("gallery-selected-count"),button=$("gallery-save-selected");
+  if(count)count.textContent=`${selected}枚選択`;
+  if(button)button.disabled=selected===0;
+  document.querySelectorAll("#photo-gallery-content .gallery-item").forEach(card=>{
+    const key=card.dataset.galleryKey;
+    card.classList.toggle("selected",gallerySelectedIds.has(key));
+    const cb=card.querySelector(".gallery-checkbox");
+    if(cb)cb.checked=gallerySelectedIds.has(key);
+  });
+}
+function toggleGalleryPhoto(key,checked){
+  if(checked)gallerySelectedIds.add(String(key));
+  else gallerySelectedIds.delete(String(key));
+  updateGallerySelectionUI();
+}
+function setAllGalleryPhotos(checked){
+  gallerySelectedIds.clear();
+  if(checked)galleryItems.forEach((item,index)=>gallerySelectedIds.add(galleryItemKey(item,index)));
+  updateGallerySelectionUI();
+}
+async function saveSelectedGalleryPhotos(button){
+  const selected=galleryItems
+    .map((item,index)=>({item,index,key:galleryItemKey(item,index)}))
+    .filter(x=>gallerySelectedIds.has(x.key));
+  if(!selected.length){alert("保存する写真を選択してください。");return}
+  button.disabled=true;button.textContent="ZIPを作成中…";
+  try{
+    if(typeof JSZip==="undefined")throw new Error("ZIP機能を読み込めません。通信状態を確認して再読み込みしてください。");
+    const zip=new JSZip(),used=new Set();
+    selected.forEach(({item,index})=>{
+      const row=item.row;
+      const original=photoSaveName(row.name,index);
+      let name=original,count=1;
+      while(used.has(name.toLowerCase())){
+        const dot=original.lastIndexOf(".");
+        name=dot>0?`${original.slice(0,dot)}_${count++}${original.slice(dot)}`:`${original}_${count++}`;
+      }
+      used.add(name.toLowerCase());
+      zip.file(name,row.blob);
+    });
+    const blob=await zip.generateAsync({type:"blob",compression:"STORE"});
+    const stamp=new Date().toISOString().slice(0,10);
+    downloadBlob(blob,`selected_photos_${stamp}.zip`);
+    toast(`${selected.length}枚をZIPにまとめました`);
+  }catch(e){
+    console.error(e);
+    alert(e.message||"選択した写真の保存に失敗しました。");
+  }finally{
+    button.textContent="選択した写真を保存（ZIP）";
+    updateGallerySelectionUI();
+  }
+}
 async function openPhotoGallery(){
   closePhotoGallery();
   const session=gallerySession,content=$("photo-gallery-content");
@@ -472,21 +546,33 @@ async function openPhotoGallery(){
   try{
     const items=await allGalleryPhotos();
     if(session!==gallerySession)return;
+    galleryItems=items;
+    gallerySelectedIds.clear();
     content.innerHTML="";$("gallery-count").textContent=`${items.length}枚`;
+    updateGallerySelectionUI();
     if(!items.length){content.textContent="この端末に保存された写真はありません。";return}
     items.forEach(({row,record,time},index)=>{
+      const item=items[index],key=galleryItemKey(item,index);
       const card=document.createElement("div"),url=URL.createObjectURL(row.blob);
-      card.className="gallery-item";card.dataset.url=url;
+      card.className="gallery-item";card.dataset.url=url;card.dataset.galleryKey=key;
+
+      const selectLabel=document.createElement("label");selectLabel.className="gallery-select";
+      const checkbox=document.createElement("input");checkbox.type="checkbox";checkbox.className="gallery-checkbox";
+      checkbox.onchange=()=>toggleGalleryPhoto(key,checkbox.checked);
+      const selectText=document.createElement("span");selectText.textContent="この写真を選択";
+      selectLabel.append(checkbox,selectText);
+
       const preview=document.createElement("button");preview.className="gallery-preview";
       preview.setAttribute("aria-label",`${row.name||"写真"}を拡大`);
       const img=document.createElement("img");img.src=url;img.alt=row.name||"記録写真";img.loading="lazy";img.decoding="async";
       preview.appendChild(img);preview.onclick=()=>showGalleryPhoto(row,index);
       const meta=document.createElement("div");meta.className="meta";meta.textContent=[time,record.location,row.name].filter(Boolean).join(" / ");
       const save=document.createElement("button");save.className="secondary";save.textContent="端末に保存";save.onclick=()=>savePhotoToDevice(row,index);
-      card.append(preview,meta,save);
+      card.append(selectLabel,preview,meta,save);
       const share=photoShareButton(row,index);if(share)card.appendChild(share);
       content.appendChild(card);
     });
+    updateGallerySelectionUI();
   }catch(e){
     if(session!==gallerySession)return;
     console.error(e);content.textContent="写真一覧を読み込めませんでした。もう一度開いてください。";
@@ -505,9 +591,15 @@ function showGalleryPhoto(row,index){
 }
 function closePhotoGallery(){
   gallerySession++;
+  galleryItems=[];
+  gallerySelectedIds.clear();
   const content=$("photo-gallery-content");
   content.querySelectorAll("[data-url]").forEach(card=>URL.revokeObjectURL(card.dataset.url));
-  content.innerHTML="";$("gallery-count").textContent="";$("photo-gallery").classList.remove("open");
+  content.innerHTML="";
+  $("gallery-count").textContent="";
+  const selectedCount=$("gallery-selected-count");if(selectedCount)selectedCount.textContent="0枚選択";
+  const saveButton=$("gallery-save-selected");if(saveButton)saveButton.disabled=true;
+  $("photo-gallery").classList.remove("open");
 }
 document.addEventListener("keydown",event=>{
   if(event.key!=="Escape")return;
