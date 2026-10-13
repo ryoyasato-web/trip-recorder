@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>出張メール・報告ジェネレーター PC v0.6.25 (ERI 総合観測室向け)</title>
+    <title>出張メール・報告ジェネレーター PC v0.6.26 (ERI 総合観測室向け)</title>
     <!-- Tailwind CSS for styling -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- EXIF.js for reading image metadata -->
@@ -132,7 +132,7 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
 
     <header class="bg-blue-800 text-white p-4 shadow-md flex-shrink-0 flex justify-between items-center">
         <div>
-            <h1 class="text-xl font-bold">出張メール・報告ジェネレーター <span class="text-sm font-normal text-blue-200">PC v0.6.25</span></h1>
+            <h1 class="text-xl font-bold">出張メール・報告ジェネレーター <span class="text-sm font-normal text-blue-200">PC v0.6.26</span></h1>
             <p class="text-xs text-blue-200">現場記録を長期保存し、出張報告まで一元管理</p>
         </div>
         <div class="flex items-center gap-3">
@@ -3764,13 +3764,23 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
                     byHeading.set(key, block);
                     blocks.push(block);
                 }
+                let pendingBlankLines = [];
+                let addedContent = false;
                 lines.forEach(line => {
                     const content = line.trim();
-                    if (content && !block.seen.has(content)) {
-                        block.seen.add(content);
-                        block.lines.push(line);
+                    if (!content) {
+                        pendingBlankLines.push(line);
+                        return;
                     }
+                    if (!block.seen.has(content)) {
+                        block.seen.add(content);
+                        block.lines.push(...pendingBlankLines, line);
+                        addedContent = true;
+                    }
+                    // 重複行に属する空白だけは追加せず、新しい本文内の空白は保持する。
+                    pendingBlankLines = [];
                 });
+                if (addedContent) block.lines.push(...pendingBlankLines);
             };
             dayEvents.forEach(ev => {
                 const range = ev.startTime === ev.endTime ? ev.startTime : ev.startTime + "～" + ev.endTime;
