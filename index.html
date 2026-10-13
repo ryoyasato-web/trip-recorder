@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="現場記録">
-<title>出張現場記録 v0.7.7</title>
+<title>出張現場記録 v0.7.8</title>
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="apple-touch-icon" href="./icon-192.png">
 <script src="https://cdn.jsdelivr.net/npm/exif-js"></script>
@@ -91,10 +91,10 @@ input:focus,textarea:focus{border-color:#60a5fa;box-shadow:0 0 0 3px #dbeafe}
    https://design.digital.go.jp/dads/components/button/
    Local adaptation, not a claim of full DADS or WCAG conformance. */
 :root{
- --md-primary:#3658a8;--md-on-primary:#fff;--md-primary-container:#dbe5ff;--md-on-primary-container:#102b60;
+ --md-primary:#17458c;--md-on-primary:#fff;--md-primary-container:#dbe5ff;--md-on-primary-container:#102b60;
  --md-secondary-container:#e1e7f5;--md-on-secondary-container:#25324b;
- --md-surface:#f9f9ff;--md-surface-container:#eef0f8;--md-surface-container-low:#f3f5fc;
- --md-on-surface:#1b1b21;--md-on-surface-variant:#454650;--md-outline:#757680;--md-outline-variant:#c5c6d0;
+ --md-surface:#ffffff;--md-surface-container:#f0f2f5;--md-surface-container-low:#f7f8fa;
+ --md-on-surface:#17191c;--md-on-surface-variant:#34363e;--md-outline:#757680;--md-outline-variant:#c5c6d0;
  --md-error:#a32128;--md-primary-hover:#284482;
  --ui-blue:var(--md-primary);--ui-blue-hover:var(--md-primary-hover);--ui-ink:var(--md-on-surface);
  --ui-muted:var(--md-on-surface-variant);--ui-line:var(--md-outline);--ui-surface:var(--md-surface);--ui-focus:#ffbe00
@@ -186,13 +186,21 @@ button:hover:not(:disabled),.camera-button:hover{filter:none}
 .gallery-toolbar{border-radius:16px;background:var(--md-surface-container);box-shadow:none}
 .install-banner{background:var(--md-primary-container);border-color:transparent;border-radius:16px}
 
+
+/* Keep foreground/background pairs together for each interactive state. */
+.camera-button:hover,.sheet-btn.primary:hover,.record-button:hover{background:var(--md-primary-hover);color:var(--md-on-primary)}
+.manual-button:hover{background:#cbd9fb;color:var(--md-on-primary-container)}
+.action.selected:hover{background:var(--md-secondary-container);color:var(--md-on-secondary-container)}
+.action:not(.selected):hover,.mini:hover,.photo-link:hover,.ghost:hover,.chip:hover{background:var(--md-primary-container);color:var(--md-on-primary-container)}
+.secondary:hover{background:#d3dced;color:var(--md-on-secondary-container)}
+.sheet-btn:not(.primary):not(.danger){color:var(--md-on-surface)}
 </style>
 </head>
 <body>
 <header>
   <div class="header-row">
     <div>
-      <div class="title">出張現場記録 <span style="font-size:11px;font-weight:500;color:#bfdbfe">v0.7.7</span></div>
+      <div class="title">出張現場記録 <span style="font-size:11px;font-weight:500;color:#bfdbfe">v0.7.8</span></div>
       <div id="clock" class="sub"></div>
     </div>
     <div class="header-actions">

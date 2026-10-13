@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>出張メール・報告ジェネレーター PC v0.6.18 (ERI 総合観測室向け)</title>
+    <title>出張メール・報告ジェネレーター PC v0.6.19 (ERI 総合観測室向け)</title>
     <!-- Tailwind CSS for styling -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- EXIF.js for reading image metadata -->
@@ -33,10 +33,10 @@
    https://design.digital.go.jp/dads/components/button/
    Local adaptation, not a claim of full DADS or WCAG conformance. */
 :root{
- --md-primary:#3658a8;--md-on-primary:#fff;--md-primary-container:#dbe5ff;--md-on-primary-container:#102b60;
+ --md-primary:#17458c;--md-on-primary:#fff;--md-primary-container:#dbe5ff;--md-on-primary-container:#102b60;
  --md-secondary-container:#e1e7f5;--md-on-secondary-container:#25324b;
- --md-surface:#f9f9ff;--md-surface-container:#eef0f8;--md-surface-container-low:#f3f5fc;
- --md-on-surface:#1b1b21;--md-on-surface-variant:#454650;--md-outline:#757680;--md-outline-variant:#c5c6d0;
+ --md-surface:#ffffff;--md-surface-container:#f0f2f5;--md-surface-container-low:#f7f8fa;
+ --md-on-surface:#17191c;--md-on-surface-variant:#34363e;--md-outline:#757680;--md-outline-variant:#c5c6d0;
  --md-error:#a32128;--md-primary-hover:#284482;
  --ui-blue:var(--md-primary);--ui-blue-hover:var(--md-primary-hover);--ui-ink:var(--md-on-surface);
  --ui-muted:var(--md-on-surface-variant);--ui-line:var(--md-outline);--ui-surface:var(--md-surface);--ui-focus:#ffbe00
@@ -65,11 +65,11 @@ body>header button{background:#fff;color:var(--ui-blue);border:1px solid var(--u
 .text-xs,.text-\[11px\],.text-\[10px\]{font-size:14px;line-height:1.7}
 .text-sm{font-size:16px;line-height:1.7}
 .text-gray-400,.text-gray-500,.text-gray-600{color:var(--ui-muted)}
-button[class*="bg-blue-"],button[class*="bg-indigo-"],button[class*="bg-amber-600"],button[class*="bg-sky-700"]{background:var(--ui-blue);color:#fff;border:1px solid var(--ui-blue);box-shadow:none;padding:10px 16px}
-button[class*="bg-blue-100"],button[class*="bg-blue-50"],button[class*="bg-white"],button[class*="bg-gray-100"]{background:#fff;color:var(--ui-blue);border:1px solid var(--ui-blue);box-shadow:none}
-button[class*="bg-red-"]{background:#fff;color:#b00020;border:1px solid #b00020;box-shadow:none}
-button[class*="bg-blue-"]:hover,button[class*="bg-indigo-"]:hover,button[class*="bg-sky-700"]:hover{background:var(--ui-blue-hover)}
-button[class*="bg-white"]:hover,button[class*="bg-gray-100"]:hover,button[class*="bg-blue-100"]:hover{background:#e8f1fe}
+button:is(.bg-blue-50,.bg-blue-100,.bg-blue-200,.bg-blue-300,.bg-blue-400,.bg-blue-500,.bg-blue-600,.bg-blue-700,.bg-blue-800,.bg-blue-900,.bg-blue-950),button:is(.bg-indigo-50,.bg-indigo-100,.bg-indigo-200,.bg-indigo-300,.bg-indigo-400,.bg-indigo-500,.bg-indigo-600,.bg-indigo-700,.bg-indigo-800,.bg-indigo-900,.bg-indigo-950),button.bg-amber-600,button.bg-sky-700{background:var(--ui-blue);color:#fff;border:1px solid var(--ui-blue);box-shadow:none;padding:10px 16px}
+button.bg-blue-100,button.bg-blue-50,button.bg-white,button.bg-gray-100{background:#fff;color:var(--ui-blue);border:1px solid var(--ui-blue);box-shadow:none}
+button:is(.bg-red-50,.bg-red-100,.bg-red-500,.bg-red-600,.bg-red-700){background:#fff;color:#b00020;border:1px solid #b00020;box-shadow:none}
+button:is(.bg-blue-50,.bg-blue-100,.bg-blue-200,.bg-blue-300,.bg-blue-400,.bg-blue-500,.bg-blue-600,.bg-blue-700,.bg-blue-800,.bg-blue-900,.bg-blue-950):hover,button:is(.bg-indigo-50,.bg-indigo-100,.bg-indigo-200,.bg-indigo-300,.bg-indigo-400,.bg-indigo-500,.bg-indigo-600,.bg-indigo-700,.bg-indigo-800,.bg-indigo-900,.bg-indigo-950):hover,button.bg-sky-700:hover{background:var(--ui-blue-hover)}
+button.bg-white:hover,button.bg-gray-100:hover,button.bg-blue-100:hover{background:#e8f1fe}
 #tab-plan,#tab-report{background:#fff;border-width:0 0 4px;border-radius:0;padding:16px;color:var(--ui-muted)}
 #tab-plan.text-blue-600,#tab-report.text-blue-600{color:var(--ui-blue);border-color:var(--ui-blue)}
 #editor-main>div{padding:24px;min-width:0;scroll-padding:24px}
@@ -101,13 +101,13 @@ body>header button{border-radius:999px;border-color:var(--md-outline)}
 #editor-main button[class*="rounded"]{border-radius:999px}
 #editor-main input[class*="rounded"],#editor-main textarea[class*="rounded"],#editor-main select[class*="rounded"]{border-radius:12px}
 #editor-main details[class*="rounded"]{border-radius:12px}
-button[class*="bg-blue-"],button[class*="bg-indigo-"],button[class*="bg-amber-600"],button[class*="bg-sky-700"]{border-radius:999px}
-button[class*="bg-blue-100"],button[class*="bg-blue-50"]{background:var(--md-secondary-container);color:var(--md-on-secondary-container);border-color:transparent}
-button[class*="bg-white"],button[class*="bg-gray-100"]{background:transparent;color:var(--md-primary);border-color:var(--md-outline)}
-button[class*="bg-blue-100"]:hover,button[class*="bg-blue-50"]:hover{background:#d3dced;color:var(--md-on-secondary-container)}
-button[class*="bg-white"]:hover,button[class*="bg-gray-100"]:hover{background:var(--md-primary-container)}
-button[class*="bg-red-"]{color:var(--md-error);border-color:var(--md-error);border-radius:999px;background:#fff}
-button[class*="bg-red-"]:hover{background:#ffdadb}
+button:is(.bg-blue-50,.bg-blue-100,.bg-blue-200,.bg-blue-300,.bg-blue-400,.bg-blue-500,.bg-blue-600,.bg-blue-700,.bg-blue-800,.bg-blue-900,.bg-blue-950),button:is(.bg-indigo-50,.bg-indigo-100,.bg-indigo-200,.bg-indigo-300,.bg-indigo-400,.bg-indigo-500,.bg-indigo-600,.bg-indigo-700,.bg-indigo-800,.bg-indigo-900,.bg-indigo-950),button.bg-amber-600,button.bg-sky-700{border-radius:999px}
+button.bg-blue-100,button.bg-blue-50{background:var(--md-secondary-container);color:var(--md-on-secondary-container);border-color:transparent}
+button.bg-white,button.bg-gray-100{background:transparent;color:var(--md-primary);border-color:var(--md-outline)}
+button.bg-blue-100:hover,button.bg-blue-50:hover{background:#d3dced;color:var(--md-on-secondary-container)}
+button.bg-white:hover,button.bg-gray-100:hover{background:var(--md-primary-container)}
+button:is(.bg-red-50,.bg-red-100,.bg-red-500,.bg-red-600,.bg-red-700){color:var(--md-error);border-color:var(--md-error);border-radius:999px;background:#fff}
+button:is(.bg-red-50,.bg-red-100,.bg-red-500,.bg-red-600,.bg-red-700):hover{background:#ffdadb}
 #tab-plan,#tab-report{background:transparent;border-radius:0}
 #tab-plan.text-blue-600,#tab-report.text-blue-600{background:var(--md-primary-container);color:var(--md-on-primary-container)}
 #auto-organize-section>div:nth-child(2){background:var(--md-primary-container);border-color:transparent;border-radius:16px}
@@ -116,6 +116,15 @@ button[class*="bg-red-"]:hover{background:#ffdadb}
 #editor-main section.border{border-color:var(--md-outline-variant)}
 #preview-text{border-color:var(--md-outline-variant);border-radius:16px}
 
+
+/* Match Tailwind header utilities explicitly: class utilities otherwise beat
+   a bare header selector, leaving dark text against the original blue surface. */
+body>header.bg-blue-800.text-white{background:#fff;color:var(--md-on-surface)}
+body>header.bg-blue-800 .text-blue-200{color:var(--md-on-surface-variant)}
+body>header.bg-blue-800 button{background:#fff;color:var(--md-primary);border-color:var(--md-primary)}
+body>header.bg-blue-800 button:hover{background:var(--md-primary-container);color:var(--md-on-primary-container)}
+button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-on-primary-container)}
+#editor-main :is(.text-gray-400,.text-gray-500,.text-gray-600){color:var(--md-on-surface-variant)}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/dropbox@10.46.0/dist/Dropbox-sdk.min.js"></script>
 </head>
@@ -123,7 +132,7 @@ button[class*="bg-red-"]:hover{background:#ffdadb}
 
     <header class="bg-blue-800 text-white p-4 shadow-md flex-shrink-0 flex justify-between items-center">
         <div>
-            <h1 class="text-xl font-bold">出張メール・報告ジェネレーター <span class="text-sm font-normal text-blue-200">PC v0.6.18</span></h1>
+            <h1 class="text-xl font-bold">出張メール・報告ジェネレーター <span class="text-sm font-normal text-blue-200">PC v0.6.19</span></h1>
             <p class="text-xs text-blue-200">現場記録を長期保存し、出張報告まで一元管理</p>
         </div>
         <div class="flex items-center gap-3">
