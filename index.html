@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="現場記録">
-<title>出張現場記録 v0.7.5</title>
+<title>出張現場記録 v0.7.6</title>
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="apple-touch-icon" href="./icon-192.png">
 <script src="https://cdn.jsdelivr.net/npm/exif-js"></script>
@@ -90,7 +90,15 @@ input:focus,textarea:focus{border-color:#60a5fa;box-shadow:0 0 0 3px #dbeafe}
    References: https://design.digital.go.jp/dads/foundations/typography/
    https://design.digital.go.jp/dads/components/button/
    Local adaptation, not a claim of full DADS or WCAG conformance. */
-:root{--ui-blue:#0017c1;--ui-blue-hover:#000082;--ui-ink:#1a1a1a;--ui-muted:#595959;--ui-line:#b3b3b3;--ui-surface:#f5f5f5;--ui-focus:#ffbe00}
+:root{
+ --md-primary:#3658a8;--md-on-primary:#fff;--md-primary-container:#dbe5ff;--md-on-primary-container:#102b60;
+ --md-secondary-container:#e1e7f5;--md-on-secondary-container:#25324b;
+ --md-surface:#f9f9ff;--md-surface-container:#eef0f8;--md-surface-container-low:#f3f5fc;
+ --md-on-surface:#1b1b21;--md-on-surface-variant:#454650;--md-outline:#757680;--md-outline-variant:#c5c6d0;
+ --md-error:#a32128;--md-primary-hover:#284482;
+ --ui-blue:var(--md-primary);--ui-blue-hover:var(--md-primary-hover);--ui-ink:var(--md-on-surface);
+ --ui-muted:var(--md-on-surface-variant);--ui-line:var(--md-outline);--ui-surface:var(--md-surface);--ui-focus:#ffbe00
+}
 body{font-family:"Noto Sans JP","Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,system-ui,sans-serif;font-size:16px;line-height:1.7;color:var(--ui-ink)}
 button,input,textarea,select{font-family:inherit}
 button,summary{touch-action:manipulation}
@@ -139,13 +147,52 @@ button:hover:not(:disabled),.camera-button:hover{filter:brightness(.96)}
 .gallery-date input{width:100%;max-width:100%;min-width:0;min-inline-size:0;-webkit-appearance:none;appearance:none}
 @media(max-width:480px){.gallery-date{flex-direction:column}.gallery-date label{flex:auto;width:100%}}
 
+
+/* Material 3 local adaptation: semantic color roles, tonal surfaces and action hierarchy.
+   https://m3.material.io/styles/color/the-color-system
+   https://github.com/material-components/material-web/blob/main/docs/components/button.md
+   Keep the existing Digital Agency typography and visible focus treatment. */
+button{border-radius:999px;min-height:48px;transition:background-color 120ms ease,border-color 120ms ease,box-shadow 120ms ease}
+button:active:not(:disabled){box-shadow:inset 0 0 0 999px #00000012}
+input:not([type=checkbox]):not([type=radio]):not([type=file]),textarea,select{border-color:var(--md-outline);border-radius:12px}
+details{border-radius:12px}
+summary{color:var(--md-primary)}
+
+:root{--blue-dark:var(--md-primary-hover);--blue-soft:var(--md-primary-container);--line:var(--md-outline-variant)}
+header{background:var(--md-surface);border-bottom:1px solid var(--md-outline-variant)}
+.chip{border-color:var(--md-outline);border-radius:999px;background:var(--md-surface)}
+.card{border:1px solid var(--md-outline-variant);border-radius:16px;background:#fff!important}
+.card:first-of-type{background:var(--md-surface-container-low)!important}
+.action,.secondary,.mini,.photo-link{border-color:var(--md-outline);border-radius:999px;min-height:48px}
+.action{background:var(--md-surface);color:var(--md-on-surface-variant)}
+.action.selected{background:var(--md-secondary-container);color:var(--md-on-secondary-container);border:2px solid var(--md-primary)}
+.action.selected::before{content:"✓ ";font-weight:700}
+.camera-button,.manual-button,.record-button,.sheet-btn.primary{background:var(--md-primary);color:var(--md-on-primary);border-radius:999px}
+.manual-button{background:var(--md-primary-container);color:var(--md-on-primary-container)}
+.manual-button:hover{background:#cbd9fb}
+.secondary{background:var(--md-secondary-container);color:var(--md-on-secondary-container);border-color:transparent}
+.mini,.photo-link{background:transparent;color:var(--md-primary)}
+button:hover:not(:disabled),.camera-button:hover{filter:none}
+.action:hover:not(.selected),.mini:hover,.photo-link:hover,.ghost:hover,.chip:hover{background:var(--md-primary-container)}
+.secondary:hover{background:#d3dced}
+.ghost{border-radius:999px}
+.log{border-color:var(--md-outline-variant);border-radius:16px;background:#fff}
+.badge{border-radius:8px}.badge-photo{background:var(--md-primary-container);color:var(--md-on-primary-container)}.badge-mixed{background:var(--md-secondary-container);color:var(--md-on-secondary-container)}
+.sheet,.modal-card{border-radius:24px;background:var(--md-surface)}
+.sheet-btn{border-radius:16px;background:#fff;border-color:var(--md-outline-variant)}
+.sheet-btn.danger{color:var(--md-error);border-color:var(--md-error)}
+.gallery-item{border-radius:16px;background:#fff;border-color:var(--md-outline-variant)}
+.gallery-item.selected{border-color:var(--md-primary);box-shadow:0 0 0 2px var(--md-primary-container)}
+.gallery-toolbar{border-radius:16px;background:var(--md-surface-container);box-shadow:none}
+.install-banner{background:var(--md-primary-container);border-color:transparent;border-radius:16px}
+
 </style>
 </head>
 <body>
 <header>
   <div class="header-row">
     <div>
-      <div class="title">出張現場記録 <span style="font-size:11px;font-weight:500;color:#bfdbfe">v0.7.5</span></div>
+      <div class="title">出張現場記録 <span style="font-size:11px;font-weight:500;color:#bfdbfe">v0.7.6</span></div>
       <div id="clock" class="sub"></div>
     </div>
     <div class="header-actions">
