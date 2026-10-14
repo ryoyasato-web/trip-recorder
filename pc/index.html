@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>出張メール・報告ジェネレーター PC v0.6.26 (ERI 総合観測室向け)</title>
+    <title>出張メール・報告ジェネレーター PC v0.6.27 (ERI 総合観測室向け)</title>
     <!-- Tailwind CSS for styling -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- EXIF.js for reading image metadata -->
@@ -132,7 +132,7 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
 
     <header class="bg-blue-800 text-white p-4 shadow-md flex-shrink-0 flex justify-between items-center">
         <div>
-            <h1 class="text-xl font-bold">出張メール・報告ジェネレーター <span class="text-sm font-normal text-blue-200">PC v0.6.26</span></h1>
+            <h1 class="text-xl font-bold">出張メール・報告ジェネレーター <span class="text-sm font-normal text-blue-200">PC v0.6.27</span></h1>
             <p class="text-xs text-blue-200">現場記録を長期保存し、出張報告まで一元管理</p>
         </div>
         <div class="flex items-center gap-3">
@@ -443,6 +443,12 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
                     </div>
                 </section>
 
+                <section class="mb-6">
+                    <label for="input-learnings" class="field-label">学んだこと・気づいたこと（任意）</label>
+                    <textarea id="input-learnings" rows="5" class="w-full p-2 border rounded" placeholder="今回の出張で学んだことや，次回に活かしたい気づきを記録してください．"></textarea>
+                    <p class="text-xs text-gray-500">空欄の場合は報告本文に表示しません。</p>
+                </section>
+
                 <section class="mb-6 rounded-lg border border-indigo-200 bg-indigo-50 p-4">
                     <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                         <div>
@@ -666,6 +672,7 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
         const tripDateAutoResult = document.getElementById('trip-date-auto-result');
         const tripDateStartInput = document.getElementById('trip-date-start');
         const tripDateEndInput = document.getElementById('trip-date-end');
+        const inputLearnings = document.getElementById('input-learnings');
         const inputSafety = document.getElementById('input-safety');
         
         const checkListContainer = document.getElementById('check-list');
@@ -720,6 +727,7 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
 
         // イベントリスナーの登録
         if (inputIntro) inputIntro.addEventListener('input', () => { updatePreview(); saveDraft(); });
+        inputLearnings.addEventListener('input', () => { updatePreview(); saveDraft(); });
         if (memoInput) memoInput.addEventListener('input', saveDraft);
         if (basicPasteInput) basicPasteInput.addEventListener('input', saveDraft);
         if (mergeMinutesInput) mergeMinutesInput.addEventListener('change', saveDraft);
@@ -1891,7 +1899,9 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
                     title,
                     basicFields: structuredClone(basicFields),
                     rawRecords: reportRelevantRawRecords(),
+                    logs: structuredClone(logs),
                     events: structuredClone(events),
+                    learnings: inputLearnings.value,
                     reportText: previewText.value,
                     subject: subjectText.value || "",
                     mergeMinutes: mergeMinutesInput?.value || "30",
@@ -2028,7 +2038,33 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
                 archiveDetail.innerHTML = `<div class="text-red-700">読み込み失敗：${escapeHtml(e.message || e)}</div>`;
             }
         }
+        let selectedTripArchive = null;
+
+        function restoreTripArchive() {
+            const a = selectedTripArchive;
+            if (!a || !confirm("保存済み出張を編集画面へ復元しますか？現在の入力は「戻る」で復元できます。")) return;
+            saveDraft();
+            rememberDraftForUndo(localStorage.getItem(STORAGE_KEY));
+            const data = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}");
+            Object.assign(data, {
+                mode: "report", basicFields: a.basicFields || [],
+                logs: a.logs || (a.rawRecords || []).map((r, id) => ({...r, id, task: [...(r.actions || []), r.note || ""].filter(Boolean).join("\n")})),
+                events: a.events || [], learnings: a.learnings || "", subject: a.subject || "",
+                subjectUserEdited: "", memo: "", excludedDropboxSyncIds: [],
+                manualTripDateOverride: false, manualTripDateStart: "", manualTripDateEnd: "",
+                mergeMinutes: a.mergeMinutes || "30", mergeDistance: a.mergeDistance || "500"
+            });
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+            selectedDropboxLogIds.clear();
+            delete subjectText.dataset.userEdited;
+            loadDraft();
+            currentDropboxRawRecords = structuredClone(a.rawRecords || []);
+            renderBasicFields(); switchMode("report"); renderLogs(); renderEvents();
+            closeArchiveView(); updatePreview(); saveDraft();
+        }
+
         function renderTripArchiveDetail(a) {
+            selectedTripArchive = a;
             const fields = Array.isArray(a.basicFields) ? a.basicFields : [];
             const raw = Array.isArray(a.rawRecords) ? a.rawRecords : [];
             const evs = Array.isArray(a.events) ? a.events : [];
@@ -2036,6 +2072,7 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
                 <div class="max-w-5xl mx-auto space-y-4">
                     <div class="bg-white border rounded-xl p-5">
                         <h3 class="text-xl font-bold text-gray-900">${escapeHtml(a.title || "出張記録")}</h3>
+                        <button onclick="restoreTripArchive()" class="mt-3 bg-indigo-700 text-white px-4 py-2 rounded">この出張を編集画面へ復元</button>
                         <div class="text-xs text-gray-500 mt-1">保存：${escapeHtml(new Date(a.savedAt).toLocaleString("ja-JP"))}</div>
                     </div>
                     <div class="bg-white border rounded-xl p-5">
@@ -2593,55 +2630,48 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
                     const place = event.locationMode === "none" ? "" :
                         (rawPlace && !/^-?\d+(?:\.\d+)?,\s*-?\d+(?:\.\d+)?$/.test(rawPlace)
                             ? rawPlace : eventReportLocation(event));
-                    const content = splitTasks(log)
-                        .filter(task => task !== "写真記録" && !/^写真撮影時刻：/.test(task))
-                        .map(task => /^(観測点到着|到着)$/.test(task) ? "到着"
-                            : /^(移動開始|出発)$/.test(task) ? "出発" : actionPhrase(task))
-                        .filter(Boolean).map(formatReportFragment).join("\n");
-                    if (!content) return "";
-                    const block = time[1] + (place ? "　" + place : "") + "\n" + content;
+                    const tasks = splitTasks(log);
+                    const headingPlace = reportHeadingPlace(place, tasks);
+                    const content = reportTaskLines(tasks, Boolean(place)).join("\n");
+                    if (!content && !headingPlace) return "";
+                    const block = time[1] + (headingPlace ? "　" + headingPlace : "") + (content ? "\n" + content : "");
                     return existing.includes(block) ? "" : block;
                 }).filter(Boolean);
         }
 
+        function movementSuffix(tasks) {
+            const labels = tasks.map(t => String(t).trim().replace(/^[・\-]\s*/, "").replace(/[。．]+$/, ""));
+            if (labels.some(t => /^(?:移動開始|出発|出発した|移動を開始した)$/.test(t))) return "発";
+            if (labels.some(t => /^(?:観測点到着|到着|現着|到着した)$/.test(t))) return "着";
+            return "";
+        }
+
+        function reportHeadingPlace(place, tasks) {
+            const name = String(place || "").trim().replace(/[。．]+$/, "");
+            const suffix = movementSuffix(tasks);
+            return name && suffix && !/[発着]$/.test(name) ? name + suffix : name;
+        }
+
+        function reportTaskLines(tasks, absorbMovement) {
+            return tasks.flatMap(task => String(task).split(/\n+/))
+                .map(task => task.trim().replace(/^[・\-]\s*/, ""))
+                .filter(task => task && task !== "写真記録" && !/^写真撮影時刻：/.test(task))
+                .filter(task => !absorbMovement || !movementSuffix([task]))
+                .map(task => formatReportFragment(actionPhrase(task) || (movementSuffix([task]) === "着" ? "到着" : "")))
+                .filter(Boolean)
+                .map(line => isReportLabel(line) ? line : "・" + line);
+        }
+
+        function eventHeadingTasks(event) {
+            // 見出しには開始時刻の元記録だけを使い，後の到着時刻は独立表示する。
+            const sources = eventSourceLogs(event);
+            return sources.length ? sources.filter(log => String(log.time || "").split(" ")[1] === event.startTime)
+                .flatMap(splitTasks) : (event.tasks || []);
+        }
+
         function generateEventProse(event) {
-            const tasks = uniqueNonEmpty(eventSummaryTasks(event));
-            const arrived = tasks.includes("観測点到着");
-            const moving = tasks.includes("移動開始");
-            const ended = tasks.includes("作業終了");
-
-            const knownActionNames = new Set([
-                "観測点到着","データ回収","地震計確認","SD交換","バッテリー交換",
-                "GPS確認","アンテナ交換","電源確認","SD回収","移動開始","作業終了","写真記録"
-            ]);
-            const actionTasks = tasks.filter(t => knownActionNames.has(t));
-            const notes = tasks.filter(t => !knownActionNames.has(t) && !/^写真撮影時刻：/.test(t));
-
-            const mainActions = actionTasks
-                .filter(t => !["観測点到着","移動開始","作業終了"].includes(t))
-                .map(actionPhrase)
-                .filter(Boolean);
-
-            const lines = [];
-            if (moving && !mainActions.length && !notes.length) {
-                lines.push("出発");
-            } else if (arrived) {
-                if (mainActions.length) {
-                    lines.push(formatReportFragment("到着後，" + joinJapaneseClauses(mainActions)));
-                } else if (!notes.length) {
-                    lines.push("到着");
-                }
-            } else if (mainActions.length) {
-                lines.push(formatReportFragment(joinJapaneseClauses(mainActions)));
-            }
-
-            notes.forEach(note => {
-                const formatted = formatReportFragment(note);
-                if (formatted) lines.push(formatted);
-            });
-
-            if (ended && !lines.includes("作業終了")) lines.push("作業終了");
-            return lines.join("\n").trim();
+            return reportTaskLines(uniqueNonEmpty(eventSummaryTasks(event)),
+                Boolean(eventReportLocation(event))).join("\n");
         }
 
         function stripLegacyEventHeaderFromProse(event, proseValue) {
@@ -3783,11 +3813,11 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
                 if (addedContent) block.lines.push(...pendingBlankLines);
             };
             dayEvents.forEach(ev => {
-                const range = ev.startTime === ev.endTime ? ev.startTime : ev.startTime + "～" + ev.endTime;
-                const place = eventReportLocation(ev);
+                const range = ev.startTime === ev.endTime || movementSuffix(eventHeadingTasks(ev)) ? ev.startTime : ev.startTime + "～" + ev.endTime;
+                const place = reportHeadingPlace(eventReportLocation(ev), eventHeadingTasks(ev));
                 let heading = range + (place ? "　" + place : "");
                 let content = [];
-                const prose = stripLegacyEventHeaderFromProse(ev, ev.prose || "").trim();
+                const prose = String(ev.prose || "").trim();
                 const text = [prose, ...eventTimedLines(ev, prose)].filter(Boolean).join("\n");
                 text.split("\n").forEach(line => {
                     if (/^\d{1,2}:\d{2}(?:～\d{1,2}:\d{2})?(?:[　\s]+.*)?$/.test(line.trim())) {
@@ -3795,7 +3825,7 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
                         heading = line.trim();
                         content = [];
                     } else {
-                        content.push(line);
+                        content.push(line.trim() && !/^[・\-]/.test(line.trim()) && !isReportLabel(line) ? "・" + line : line);
                     }
                 });
                 add(heading, content);
@@ -3896,25 +3926,23 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
                         dayLogs.forEach((l, logIndex) => {
                             const rawLoc = String(l.location || "").trim();
                             const loc = /^-?\d+(?:\.\d+)?,\s*-?\d+(?:\.\d+)?$/.test(rawLoc) ? "" : rawLoc;
-                            reportText += `${l.time}${loc ? "　"+loc : ""}\n`;
+                            const headingPlace = reportHeadingPlace(loc, splitTasks(l));
+                            reportText += `${l.time}${headingPlace ? "　"+headingPlace : ""}\n`;
                             if (l.task) {
                                 const tasks = l.task.split('\n').filter(t => {
                                     const x=t.trim();
                                     return x && x !== "写真記録" && !/^写真撮影時刻：/.test(x);
                                 });
-                                tasks.forEach(t => {
-                                    if (t.trim().startsWith('・') || t.trim().startsWith('-')) {
-                                        reportText += `　${t.trim()}\n`;
-                                    } else {
-                                        reportText += `　・${t.trim()}\n`;
-                                    }
-                                });
+                                reportTaskLines(tasks, Boolean(loc)).forEach(t => { reportText += t + "\n"; });
                             }
                             if (logIndex < dayLogs.length - 1) reportText += "\n";
                         });
                     }
                 }
 
+                if (inputLearnings.value.trim()) {
+                    reportText += "\n学んだこと・気づいたこと\n" + inputLearnings.value.trim() + "\n";
+                }
                 reportText += "\n以上、よろしくお願いいたします。";
             }
             
@@ -4037,6 +4065,7 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
                 basicPresets,
                 basicPaste: basicPasteInput.value,
                 safety: inputSafety.value,
+                learnings: inputLearnings.value,
                 logs,
                 logIdCounter,
                 events,
@@ -4107,6 +4136,7 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
                     basicPresets = { ...JSON.parse(JSON.stringify(DEFAULT_PRESETS)), ...data.basicPresets };
                 }
                 if (typeof data.basicPaste === "string") basicPasteInput.value = data.basicPaste;
+                inputLearnings.value = typeof data.learnings === "string" ? data.learnings : "";
                 if (typeof data.safety === "string") inputSafety.value = data.safety;
                 if (Array.isArray(data.logs)) logs = data.logs;
                 if (Number.isInteger(data.logIdCounter)) logIdCounter = data.logIdCounter;
@@ -4122,7 +4152,7 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
                         }
                         if (out.autoLocation === undefined) out.autoLocation = "";
                         if (out.autoLocationFull === undefined) out.autoLocationFull = "";
-                        if (typeof out.prose === "string") out.prose = stripLegacyEventHeaderFromProse(out, out.prose);
+                        if (typeof out.prose === "string" && !eventProseWasEdited(out)) out.prose = stripLegacyEventHeaderFromProse(out, out.prose);
                         if (out.proseEdited === undefined) out.proseEdited = eventProseWasEdited(out);
                         if (!out.proseEdited) out.prose = generateEventProse(out);
                         return out;
@@ -4181,6 +4211,7 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
             inputSafety.value = "・安全運転を心がける。\n・出張前、作業前に天気予報等を確認する。\n・現場での怪我に備えて救急セットを用意する。";
             subjectText.value = "";
             memoInput.value = "";
+            inputLearnings.value = "";
             timelinePoints = [];
             timelineVisits = [];
             timelineInput.value = "";
