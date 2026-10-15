@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>出張メール・報告ジェネレーター PC v0.6.28 (ERI 総合観測室向け)</title>
+    <title>出張メール・報告ジェネレーター PC v0.6.29 (ERI 総合観測室向け)</title>
     <!-- Tailwind CSS for styling -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- EXIF.js for reading image metadata -->
@@ -138,7 +138,7 @@ body>header{position:sticky;top:0;z-index:30}
 
     <header class="bg-blue-800 text-white p-4 shadow-md flex-shrink-0 flex justify-between items-center">
         <div>
-            <h1 class="text-xl font-bold">出張メール・報告ジェネレーター <span class="text-sm font-normal text-blue-200">PC v0.6.28</span></h1>
+            <h1 class="text-xl font-bold">出張メール・報告ジェネレーター <span class="text-sm font-normal text-blue-200">PC v0.6.29</span></h1>
             <p class="text-xs text-blue-200">現場記録を長期保存し、出張報告まで一元管理</p>
         </div>
         <div class="flex items-center gap-3">
@@ -2219,10 +2219,21 @@ body>header{position:sticky;top:0;z-index:30}
         }
 
         function splitTasks(log) {
-            return String(log.task || "")
-                .split(/\n+/)
-                .map(v => v.trim().replace(/^[・\-]\s*/, ""))
-                .filter(Boolean);
+            return reportWorkUnits(log.task);
+        }
+
+        function reportWorkUnits(value) {
+            const units = [];
+            String(value || "").split("\n").forEach(line => {
+                if (!line.trim()) return;
+                const bullet = /^\s*[・\-]\s*/.test(line);
+                if (!bullet && /^[\s　]/.test(line) && units.length) {
+                    units[units.length - 1] += "\n" + line;
+                } else {
+                    units.push(line.trim().replace(/^[・\-]\s*/, ""));
+                }
+            });
+            return units;
         }
 
         function eventLocationFromLogs(group) {
@@ -2665,7 +2676,7 @@ body>header{position:sticky;top:0;z-index:30}
         }
 
         function movementSuffix(tasks) {
-            const labels = tasks.map(t => String(t).trim().replace(/^[・\-]\s*/, "").replace(/[。．]+$/, ""));
+            const labels = tasks.map(t => String(t).split("\n")[0].trim().replace(/^[・\-]\s*/, "").replace(/[。．]+$/, ""));
             if (labels.some(t => /^(?:移動開始|出発|出発した|移動を開始した)$/.test(t))) return "発";
             if (labels.some(t => /^(?:観測点到着|到着|現着|到着した)$/.test(t))) return "着";
             return "";
@@ -2678,10 +2689,13 @@ body>header{position:sticky;top:0;z-index:30}
         }
 
         function reportTaskLines(tasks, absorbMovement) {
-            return tasks.flatMap(task => String(task).split(/\n+/))
-                .map(task => task.trim().replace(/^[・\-]\s*/, ""))
+            return tasks.flatMap(task => reportWorkUnits(task))
+                .map(task => {
+                    const lines = task.split("\n");
+                    if (absorbMovement && movementSuffix([lines[0]])) lines.shift();
+                    return lines.join("\n").trim();
+                })
                 .filter(task => task && task !== "写真記録" && !/^写真撮影時刻：/.test(task))
-                .filter(task => !absorbMovement || !movementSuffix([task]))
                 .map(task => formatReportFragment(actionPhrase(task) || (movementSuffix([task]) === "着" ? "到着" : "")))
                 .filter(Boolean)
                 .map(line => isReportLabel(line) ? line : "・" + line);
@@ -2689,8 +2703,7 @@ body>header{position:sticky;top:0;z-index:30}
 
         // Newlines/bullets mark work units; sentence punctuation alone never splits one.
         function formatLearningLines(value) {
-            return String(value || "").split(/\n+/).map(line => line.trim().replace(/^[・\-]\s*/, ""))
-                .filter(Boolean).map(line => "・" + formatReportFragment(line)).join("\n");
+            return reportWorkUnits(value).map(line => "・" + formatReportFragment(line)).join("\n");
         }
 
         function eventHeadingTasks(event) {
@@ -3844,19 +3857,35 @@ body>header{position:sticky;top:0;z-index:30}
                 if (addedContent) block.lines.push(...pendingBlankLines);
             };
             dayEvents.forEach(ev => {
-                const range = ev.startTime === ev.endTime || movementSuffix(eventHeadingTasks(ev)) ? ev.startTime : ev.startTime + "～" + ev.endTime;
-                const place = reportHeadingPlace(eventReportLocation(ev), eventHeadingTasks(ev));
+                const prose = String(ev.prose || "").trim();
+                const headingTasks = [...eventHeadingTasks(ev), prose.split("\n")[0]];
+                const range = ev.startTime === ev.endTime || movementSuffix(headingTasks) ? ev.startTime : ev.startTime + "～" + ev.endTime;
+                const place = reportHeadingPlace(eventReportLocation(ev), headingTasks);
                 let heading = range + (place ? "　" + place : "");
                 let content = [];
-                const prose = String(ev.prose || "").trim();
                 const text = [prose, ...eventTimedLines(ev, prose)].filter(Boolean).join("\n");
+                let hasBody = false;
                 text.split("\n").forEach(line => {
                     if (/^\d{1,2}:\d{2}(?:～\d{1,2}:\d{2})?(?:[　\s]+.*)?$/.test(line.trim())) {
                         add(heading, content);
                         heading = line.trim();
                         content = [];
+                        hasBody = false;
                     } else {
-                        content.push(line.trim() && !/^[・\-]/.test(line.trim()) && !isReportLabel(line) ? "・" + line : line);
+                        // Absorb a leading movement label in the displayed heading only.
+                        // Keep the stored prose, including manual continuation lines, intact.
+                        const suffix = movementSuffix([line]);
+                        const match = heading.match(/^(\d{1,2}:\d{2}(?:～\d{1,2}:\d{2})?)\s+(.+)$/);
+                        if (!hasBody && suffix && match) {
+                            heading = match[1] + "　" + reportHeadingPlace(match[2], [line]);
+                            return;
+                        }
+                        if (!line.trim()) { content.push(line); return; }
+                        const explicitBullet = /^\s*[・\-]/.test(line);
+                        const continuation = /^[\s　]/.test(line) && !explicitBullet && hasBody;
+                        content.push(explicitBullet ? "・" + line.trim().replace(/^[・\-]\s*/, "") :
+                            continuation || isReportLabel(line) ? line : "・" + line.trim());
+                        hasBody = true;
                     }
                 });
                 add(heading, content);
@@ -3956,7 +3985,7 @@ body>header{position:sticky;top:0;z-index:30}
                             const headingPlace = reportHeadingPlace(loc, splitTasks(l));
                             reportText += `${l.time}${headingPlace ? "　"+headingPlace : ""}\n`;
                             if (l.task) {
-                                const tasks = l.task.split('\n').filter(t => {
+                                const tasks = splitTasks(l).filter(t => {
                                     const x=t.trim();
                                     return x && x !== "写真記録" && !/^写真撮影時刻：/.test(x);
                                 });
