@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>出張メール・報告ジェネレーター PC v0.6.29 (ERI 総合観測室向け)</title>
+    <title>出張メール・報告ジェネレーター PC v0.6.30 (ERI 総合観測室向け)</title>
     <!-- Tailwind CSS for styling -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- EXIF.js for reading image metadata -->
@@ -138,7 +138,7 @@ body>header{position:sticky;top:0;z-index:30}
 
     <header class="bg-blue-800 text-white p-4 shadow-md flex-shrink-0 flex justify-between items-center">
         <div>
-            <h1 class="text-xl font-bold">出張メール・報告ジェネレーター <span class="text-sm font-normal text-blue-200">PC v0.6.29</span></h1>
+            <h1 class="text-xl font-bold">出張メール・報告ジェネレーター <span class="text-sm font-normal text-blue-200">PC v0.6.30</span></h1>
             <p class="text-xs text-blue-200">現場記録を長期保存し、出張報告まで一元管理</p>
         </div>
         <div class="flex items-center gap-3">
@@ -2276,7 +2276,8 @@ body>header{position:sticky;top:0;z-index:30}
         }
 
         function normalizeReportPunctuation(text) {
-            return String(text || "").replace(/、/g, "，").replace(/。/g, "．");
+            // 本文の句読点はユーザーの入力を保持する。
+            return String(text || "");
         }
 
         function joinJapaneseClauses(clauses) {
@@ -2287,7 +2288,7 @@ body>header{position:sticky;top:0;z-index:30}
         }
 
         function isReportLabel(text) {
-            const t = normalizeReportPunctuation(text).trim().replace(/[．.!！?？]+$/, "");
+            const t = normalizeReportPunctuation(text).trim().replace(/[。．.!！?？]+$/, "");
             if (!t) return false;
             return /^(?:出発|到着|現着|移動|移動開始|作業終了|撤収|観測点到着)$/.test(t);
         }
@@ -2295,9 +2296,8 @@ body>header{position:sticky;top:0;z-index:30}
         function formatReportFragment(text) {
             let t = normalizeReportPunctuation(text).trim();
             if (!t) return "";
-            if (isReportLabel(t)) return t.replace(/[．.!！?？]+$/, "");
-            if (/[．！!？?]$/.test(t)) return t;
-            return t + "．";
+            if (isReportLabel(t)) return t.replace(/[。．.!！?？]+$/, "");
+            return t;
         }
 
         function ensurePeriod(text) {
@@ -3200,21 +3200,29 @@ body>header{position:sticky;top:0;z-index:30}
                 text = m[2].trim();
             }
 
-            const pieces = text
-                .split(/[、,，／/]+|\s*・\s*/)
-                .map(v => v.trim())
-                .filter(Boolean);
-
+            // 自由メモ内の区切り・句読点は再構成せず、入力された表記を保つ。
+            const pieces = text.split(/([、,，／/]+|\s*・\s*)/);
             const actions = [];
             const freeNotes = [];
-            for (const piece of pieces) {
+            let previousWasFree = false;
+            for (let index = 0; index < pieces.length; index += 2) {
+                const piece = pieces[index].trim();
+                if (!piece) continue;
                 const action = normalizeMemoActionToken(piece);
-                if (action) actions.push(action);
-                else freeNotes.push(piece);
+                if (action) {
+                    const punctuation = piece.match(/[。．]+$/)?.[0] || "";
+                    actions.push(punctuation && !isReportLabel(action)
+                        ? actionPhrase(action) + punctuation : action);
+                    previousWasFree = false;
+                } else {
+                    if (previousWasFree) freeNotes[freeNotes.length - 1] += pieces[index - 1] + pieces[index];
+                    else freeNotes.push(piece);
+                    previousWasFree = true;
+                }
             }
 
-            const normalizedLines = [...new Set(actions)];
-            if (freeNotes.length) normalizedLines.push(freeNotes.join("、"));
+            const normalizedLines = actions.length
+                ? [...new Set(actions), ...freeNotes] : [text];
 
             return {
                 location,
@@ -3915,7 +3923,7 @@ body>header{position:sticky;top:0;z-index:30}
                 }
                 reportText += `どうぞよろしくお願いいたします。`;
             } else {
-                reportText += `以下の出張報告をお送りします。\n\n`;
+                reportText += `以下の出張報告をお送りします\n\n`;
                 
                 // 基本情報の各行の頭に > を付与
                 const basicInfoLines = inputBasicInfo.value.split('\n');
@@ -3999,7 +4007,7 @@ body>header{position:sticky;top:0;z-index:30}
                 if (inputLearnings.value.trim()) {
                     reportText += "\n学んだこと・気づいたこと\n" + formatLearningLines(inputLearnings.value) + "\n";
                 }
-                reportText += "\n以上、よろしくお願いいたします。";
+                reportText += "\n以上、よろしくお願いいたします";
             }
             
             previewText.value = reportText;
