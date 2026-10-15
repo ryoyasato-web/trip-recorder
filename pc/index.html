@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>出張メール・報告ジェネレーター PC v0.6.27 (ERI 総合観測室向け)</title>
+    <title>出張メール・報告ジェネレーター PC v0.6.28 (ERI 総合観測室向け)</title>
     <!-- Tailwind CSS for styling -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- EXIF.js for reading image metadata -->
@@ -125,6 +125,12 @@ body>header.bg-blue-800 button{background:#fff;color:var(--md-primary);border-co
 body>header.bg-blue-800 button:hover{background:var(--md-primary-container);color:var(--md-on-primary-container)}
 button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-on-primary-container)}
 #editor-main :is(.text-gray-400,.text-gray-500,.text-gray-600){color:var(--md-on-surface-variant)}
+/* The header stays outside desktop scrolling panes and follows mobile scrolling. */
+body>header{position:sticky;top:0;z-index:30}
+#archive-save-controls{display:flex;flex-direction:column;gap:2px;min-width:0;max-width:100%}
+#archive-save-status{overflow-wrap:anywhere;max-width:32em}
+@media(max-width:1023px){body>header{padding:8px 16px;gap:8px}body>header h1{font-size:16px}body>header>div:last-child{gap:8px}body>header button{padding:6px 12px;min-height:44px}}
+@media(max-width:600px){body>header>div:first-child{display:none}body>header>div:last-child{width:100%}#archive-save-controls{flex:1 0 100%;flex-direction:row;align-items:center;gap:8px}#archive-save-button{flex:0 0 auto}#archive-save-status{font-size:12px;line-height:1.4}body>header button{font-size:14px}#save-status{font-size:12px}}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/dropbox@10.46.0/dist/Dropbox-sdk.min.js"></script>
 </head>
@@ -132,10 +138,14 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
 
     <header class="bg-blue-800 text-white p-4 shadow-md flex-shrink-0 flex justify-between items-center">
         <div>
-            <h1 class="text-xl font-bold">出張メール・報告ジェネレーター <span class="text-sm font-normal text-blue-200">PC v0.6.27</span></h1>
+            <h1 class="text-xl font-bold">出張メール・報告ジェネレーター <span class="text-sm font-normal text-blue-200">PC v0.6.28</span></h1>
             <p class="text-xs text-blue-200">現場記録を長期保存し、出張報告まで一元管理</p>
         </div>
         <div class="flex items-center gap-3">
+            <div id="archive-save-controls">
+                <button id="archive-save-button" onclick="saveCurrentTripArchive()" title="基本情報・現場記録・イベント・報告文をDropboxへ明示保存">出張アーカイブへ保存</button>
+                <span id="archive-save-status" role="status" aria-live="polite" class="text-xs text-gray-500">アーカイブ：未保存</span>
+            </div>
             <span id="save-status" class="text-xs text-blue-200">自動保存: ON</span>
             <button id="undo-draft" onclick="undoDraft()" disabled class="text-xs px-3 py-1 rounded">戻る</button>
             <button onclick="repairDuplicateLogs()" class="text-xs px-3 py-1 rounded">重複を整理</button>
@@ -449,20 +459,7 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
                     <p class="text-xs text-gray-500">空欄の場合は報告本文に表示しません。</p>
                 </section>
 
-                <section class="mb-6 rounded-lg border border-indigo-200 bg-indigo-50 p-4">
-                    <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                        <div>
-                            <h2 class="font-bold text-indigo-900">📁 この出張を記録アーカイブへ保存</h2>
-                            <p class="text-[11px] text-gray-600 mt-1">
-                                基本情報・生の現場記録・整理後イベント・完成した報告文をDropboxへまとめて保存します。
-                            </p>
-                        </div>
-                        <button onclick="saveCurrentTripArchive()" class="bg-indigo-700 hover:bg-indigo-800 text-white font-bold px-4 py-2 rounded-lg shadow whitespace-nowrap">
-                            アーカイブ保存
-                        </button>
-                    </div>
-                    <div id="archive-save-status" class="text-xs text-gray-500 mt-2">未保存</div>
-                </section>
+
             </div>
         </div>
 
@@ -722,6 +719,23 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
         const archiveSearch = document.getElementById('archive-search');
         const archiveListStatus = document.getElementById('archive-list-status');
         const archiveSaveStatus = document.getElementById('archive-save-status');
+        let archivedFingerprint = null;
+        let archivedStatusText = "";
+        let archiveSaving = false;
+        function archiveFingerprint() {
+            return JSON.stringify([basicFields, logs, events, inputLearnings.value, previewText.value,
+                subjectText.value, mergeMinutesInput?.value, mergeDistanceInput?.value]);
+        }
+        function refreshArchiveSaveStatus() {
+            if (archiveSaving) return;
+            if (archivedFingerprint !== null && archivedFingerprint !== archiveFingerprint()) {
+                archiveSaveStatus.textContent = "アーカイブ：変更あり・未保存";
+                archiveSaveStatus.className = "text-xs text-amber-700";
+            } else if (archivedFingerprint !== null) {
+                archiveSaveStatus.textContent = archivedStatusText;
+                archiveSaveStatus.className = "text-xs text-green-700";
+            }
+        }
         const archiveTabTrips = document.getElementById('archive-tab-trips');
         const archiveTabRaw = document.getElementById('archive-tab-raw');
 
@@ -1887,10 +1901,14 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
             if (!title || title === "出張記録") {
                 if (!confirm("基本情報の「日程」「用務」「用務先」が未入力です。このまま保存しますか？")) return;
             }
+            if (archiveSaving) return;
+            archiveSaving = true;
+            const saveButton = document.getElementById("archive-save-button");
+            saveButton.disabled = true;
             archiveSaveStatus.textContent = "Dropboxへ保存中…";
             archiveSaveStatus.className = "text-xs text-indigo-700 mt-2";
             try {
-                const token = await getDropboxAccessToken();
+                const fingerprint = archiveFingerprint();
                 const id = archiveId();
                 const snapshot = {
                     version: "eri-trip-archive-v1",
@@ -1907,6 +1925,7 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
                     mergeMinutes: mergeMinutesInput?.value || "30",
                     mergeDistance: mergeDistanceInput?.value || "500"
                 };
+                const token = await getDropboxAccessToken();
                 const path = `/archive_${id}.json`;
                 await uploadDropboxJsonPath(token, path, snapshot);
 
@@ -1925,12 +1944,18 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
                 index.updatedAt = new Date().toISOString();
                 await uploadDropboxJsonPath(token, DROPBOX_ARCHIVE_INDEX_FILE, index);
                 archiveIndex = index.items;
+                archivedFingerprint = fingerprint;
                 archiveSaveStatus.textContent = `保存済み：${new Date().toLocaleString("ja-JP")} / 生記録 ${snapshot.rawRecords.length}件`;
+                archivedStatusText = archiveSaveStatus.textContent;
                 archiveSaveStatus.className = "text-xs text-green-700 mt-2";
             } catch (e) {
                 console.error(e);
                 archiveSaveStatus.textContent = `保存失敗：${e.message || e}`;
                 archiveSaveStatus.className = "text-xs text-red-700 mt-2";
+            } finally {
+                archiveSaving = false;
+                saveButton.disabled = false;
+                if (archivedFingerprint !== null && !archiveSaveStatus.textContent.startsWith("保存失敗")) refreshArchiveSaveStatus();
             }
         }
         function openArchiveView() {
@@ -2647,7 +2672,7 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
         }
 
         function reportHeadingPlace(place, tasks) {
-            const name = String(place || "").trim().replace(/[。．]+$/, "");
+            const name = String(place || "").trim().replace(/[、，。．]+$/, "");
             const suffix = movementSuffix(tasks);
             return name && suffix && !/[発着]$/.test(name) ? name + suffix : name;
         }
@@ -2660,6 +2685,12 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
                 .map(task => formatReportFragment(actionPhrase(task) || (movementSuffix([task]) === "着" ? "到着" : "")))
                 .filter(Boolean)
                 .map(line => isReportLabel(line) ? line : "・" + line);
+        }
+
+        // Newlines/bullets mark work units; sentence punctuation alone never splits one.
+        function formatLearningLines(value) {
+            return String(value || "").split(/\n+/).map(line => line.trim().replace(/^[・\-]\s*/, ""))
+                .filter(Boolean).map(line => "・" + formatReportFragment(line)).join("\n");
         }
 
         function eventHeadingTasks(event) {
@@ -3880,9 +3911,7 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
                         groupedEvents[ev.date].push(ev);
                     });
                     const dayEntries = Object.entries(groupedEvents);
-                    const tripRange = effectiveTripDateRange();
-                    const tripIsMultiDay = Boolean(tripRange && ymdKey(tripRange.start) !== ymdKey(tripRange.end));
-                    const showDateHeadings = dayEntries.length > 1 || tripIsMultiDay;
+                    const showDateHeadings = true;
 
                     for (const [dateText, dayEvents] of dayEntries) {
                         if (showDateHeadings) {
@@ -3918,9 +3947,7 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
                     });
 
                     const groupedLogEntries = Object.entries(groupedLogs);
-                    const tripRange = effectiveTripDateRange();
-                    const tripIsMultiDay = Boolean(tripRange && ymdKey(tripRange.start) !== ymdKey(tripRange.end));
-                    const showLogDates = groupedLogEntries.length > 1 || tripIsMultiDay;
+                    const showLogDates = true;
                     for (const [date, dayLogs] of groupedLogEntries) {
                         if (showLogDates) reportText += `${date}\n`;
                         dayLogs.forEach((l, logIndex) => {
@@ -3941,7 +3968,7 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
                 }
 
                 if (inputLearnings.value.trim()) {
-                    reportText += "\n学んだこと・気づいたこと\n" + inputLearnings.value.trim() + "\n";
+                    reportText += "\n学んだこと・気づいたこと\n" + formatLearningLines(inputLearnings.value) + "\n";
                 }
                 reportText += "\n以上、よろしくお願いいたします。";
             }
@@ -4056,6 +4083,7 @@ button:is(.bg-blue-50,.bg-blue-100,.bg-white,.bg-gray-100):hover{color:var(--md-
         }
 
         function saveDraft() {
+            refreshArchiveSaveStatus();
             const data = {
                 mode: currentMode,
                 intro: inputIntro.value,
