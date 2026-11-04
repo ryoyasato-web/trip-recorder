@@ -1,4 +1,4 @@
-const CACHE="eri-field-recorder-v079";
+const CACHE="eri-field-recorder-v080";
 const CORE=["./","./index.html","./manifest.webmanifest","./icon-192.png","./icon-512.png"];
 
 self.addEventListener("install",e=>{

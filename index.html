@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="現場記録">
-<title>出張現場記録 v0.7.8</title>
+<title>出張現場記録 v0.7.9</title>
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="apple-touch-icon" href="./icon-192.png">
 <script src="https://cdn.jsdelivr.net/npm/exif-js"></script>
@@ -200,7 +200,7 @@ button:hover:not(:disabled),.camera-button:hover{filter:none}
 <header>
   <div class="header-row">
     <div>
-      <div class="title">出張現場記録 <span style="font-size:11px;font-weight:500;color:#bfdbfe">v0.7.8</span></div>
+      <div class="title">出張現場記録 <span style="font-size:11px;font-weight:500;color:#bfdbfe">v0.7.9</span></div>
       <div id="clock" class="sub"></div>
     </div>
     <div class="header-actions">
@@ -360,10 +360,12 @@ button:hover:not(:disabled),.camera-button:hover{filter:none}
       <div class="gallery-toolbar-row">
         <button class="secondary" onclick="setAllGalleryPhotos(true)">表示中の写真を全選択</button>
         <button class="secondary" onclick="setAllGalleryPhotos(false)">選択解除</button>
+        <button id="gallery-save-device" class="secondary" onclick="saveSelectedGalleryToDevice()" disabled>端末に保存</button>
         <button id="gallery-save-selected" class="secondary" onclick="saveSelectedGalleryPhotos(this)" disabled>選択した写真を保存（ZIP）</button>
         <span id="gallery-selected-count" class="meta" style="margin:0">0枚選択</span>
       </div>
     </div>
+    <div id="gallery-export" aria-live="polite"></div>
     <div id="photo-gallery-content"></div>
   </div>
 </div>
@@ -614,7 +616,8 @@ function updateGallerySelectionUI(){
   const count=$("gallery-selected-count"),button=$("gallery-save-selected");
   const visibleSelected=galleryVisibleItems.filter(({item,index})=>gallerySelectedIds.has(galleryItemKey(item,index))).length;
   if(count)count.textContent=`${selected}枚選択${selected>visibleSelected?`（表示外 ${selected-visibleSelected}枚を含む）`:""}`;
-  if(button)button.disabled=selected===0;
+  if(button)button.disabled=selected===0||galleryZipBusy;
+  $("gallery-save-device").disabled=selected===0;
   document.querySelectorAll("#photo-gallery-content .gallery-item").forEach(card=>{
     const key=card.dataset.galleryKey;
     card.classList.toggle("selected",gallerySelectedIds.has(key));
@@ -623,43 +626,104 @@ function updateGallerySelectionUI(){
   });
 }
 function toggleGalleryPhoto(key,checked){
+  $("gallery-export").replaceChildren();
   if(checked)gallerySelectedIds.add(String(key));
   else gallerySelectedIds.delete(String(key));
   updateGallerySelectionUI();
 }
 function setAllGalleryPhotos(checked){
+  $("gallery-export").replaceChildren();
   if(checked)galleryVisibleItems.forEach(({item,index})=>gallerySelectedIds.add(galleryItemKey(item,index)));
   else gallerySelectedIds.clear();
   updateGallerySelectionUI();
 }
-async function saveSelectedGalleryPhotos(button){
-  const selected=galleryItems
-    .map((item,index)=>({item,index,key:galleryItemKey(item,index)}))
-    .filter(x=>gallerySelectedIds.has(x.key));
-  if(!selected.length){alert("保存する写真を選択してください。");return}
-  button.disabled=true;button.textContent="ZIPを作成中…";
+let galleryZipBusy=false;
+function selectedGalleryExports(){
+  const used=new Set();
+  return galleryItems.flatMap((item,index)=>{
+    if(!gallerySelectedIds.has(galleryItemKey(item,index)))return [];
+    const row=item.row;
+    const original=photoSaveName(row.name,index);
+    let name=original,count=1;
+    while(used.has(name.toLowerCase())){
+      const dot=original.lastIndexOf(".");
+      const suffix="_"+count++;
+      name=dot>0?original.slice(0,dot)+suffix+original.slice(dot):original+suffix;
+    }
+    used.add(name.toLowerCase());
+    return [{row,name}];
+  });
+}
+function galleryExportMessage(message){
+  const panel=$("gallery-export"),note=document.createElement("p");
+  note.className="meta";note.textContent=message;
+  panel.replaceChildren(note);
+  return panel;
+}
+function galleryExportButton(panel,label,action){
+  const button=document.createElement("button");
+  button.className="secondary";button.textContent=label;button.onclick=action;
+  panel.append(button);
+}
+async function saveSelectedGalleryToDevice(){
+  const selected=selectedGalleryExports(),session=gallerySession;
+  if(!selected.length)return;
+  $("gallery-export").replaceChildren();
   try{
-    if(typeof JSZip==="undefined")throw new Error("ZIP機能を読み込めません。通信状態を確認して再読み込みしてください。");
-    const zip=new JSZip(),used=new Set();
-    selected.forEach(({item,index})=>{
-      const row=item.row;
-      const original=photoSaveName(row.name,index);
-      let name=original,count=1;
-      while(used.has(name.toLowerCase())){
-        const dot=original.lastIndexOf(".");
-        name=dot>0?`${original.slice(0,dot)}_${count++}${original.slice(dot)}`:`${original}_${count++}`;
+    if(navigator.share && navigator.canShare && typeof File==="function"){
+      const files=selected.map(({row,name})=>new File([row.blob],name,{
+        type:row.blob.type||row.type||"application/octet-stream"
+      }));
+      if(navigator.canShare({files})){
+        await navigator.share({files});
+        return;
       }
-      used.add(name.toLowerCase());
-      zip.file(name,row.blob);
-    });
-    const blob=await zip.generateAsync({type:"blob",compression:"STORE"});
+    }
+  }catch(e){
+    if(e.name==="AbortError")return;
+    console.error(e);
+  }
+  if(session!==gallerySession)return;
+  const panel=galleryExportMessage("一括共有を利用できないため、下のボタンを1枚ずつ押して保存してください。");
+  selected.forEach(({row,name})=>galleryExportButton(panel,name,()=>{
+    try{downloadBlob(row.blob,name)}
+    catch(e){console.error(e);alert(name+" をダウンロードできませんでした。")}
+  }));
+}
+async function saveSelectedGalleryPhotos(button){
+  const selected=selectedGalleryExports(),session=gallerySession;
+  if(!selected.length||galleryZipBusy)return;
+  galleryZipBusy=true;
+  button.disabled=true;button.textContent="ZIPを作成中…";
+  const progress=galleryExportMessage(selected.length+"枚のZIPを作成中…").firstChild;
+  let step="ZIP機能の読み込み";
+  try{
+    if(typeof JSZip==="undefined")throw new Error("JSZipが未読込です。通信状態を確認して再読み込みしてください。");
+    const zip=new JSZip();
+    for(const {row,name} of selected){
+      step="写真の読み込み（"+name+"）";
+      if(!(row.blob instanceof Blob)||!row.blob.size)throw new Error("写真データが空か、Blob形式ではありません。");
+      zip.file(name,await row.blob.arrayBuffer(),{binary:true});
+    }
+    step="ZIPの生成";
+    const blob=await zip.generateAsync({type:"blob",compression:"STORE",streamFiles:true});
+    if(session!==gallerySession)return;
     const stamp=new Date().toISOString().slice(0,10);
-    downloadBlob(blob,`selected_photos_${stamp}.zip`);
-    toast(`${selected.length}枚をZIPにまとめました`);
+    const panel=galleryExportMessage(selected.length+"枚のZIPができました。下のボタンを押して保存してください。");
+    galleryExportButton(panel,"ZIPをダウンロード",()=>{
+      try{downloadBlob(blob,"selected_photos_"+stamp+".zip")}
+      catch(e){
+        console.error(e);
+        alert("ZIPのダウンロードを開始できませんでした（"+(e.message||e.name)+"）。「端末に保存」をお試しください。");
+      }
+    });
   }catch(e){
     console.error(e);
-    alert(e.message||"選択した写真の保存に失敗しました。");
+    if(session===gallerySession){
+      galleryExportMessage(step+"に失敗しました（"+(e.message||e.name)+"）。「端末に保存」をお試しください。");
+    }
   }finally{
+    galleryZipBusy=false;
     button.textContent="選択した写真を保存（ZIP）";
     updateGallerySelectionUI();
   }
@@ -772,7 +836,8 @@ function closePhotoGallery(){
   content.innerHTML="";
   $("gallery-count").textContent="";
   const selectedCount=$("gallery-selected-count");if(selectedCount)selectedCount.textContent="0枚選択";
-  const saveButton=$("gallery-save-selected");if(saveButton)saveButton.disabled=true;
+  $("gallery-export").replaceChildren();
+  updateGallerySelectionUI();
   $("photo-gallery").classList.remove("open");
 }
 document.addEventListener("keydown",event=>{
