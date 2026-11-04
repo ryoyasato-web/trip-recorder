@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="現場記録">
-<title>出張現場記録 v0.7.9</title>
+<title>出張現場記録 v0.7.10</title>
 <link rel="manifest" href="./manifest.webmanifest">
 <link rel="apple-touch-icon" href="./icon-192.png">
 <script src="https://cdn.jsdelivr.net/npm/exif-js"></script>
@@ -200,7 +200,7 @@ button:hover:not(:disabled),.camera-button:hover{filter:none}
 <header>
   <div class="header-row">
     <div>
-      <div class="title">出張現場記録 <span style="font-size:11px;font-weight:500;color:#bfdbfe">v0.7.9</span></div>
+      <div class="title">出張現場記録 <span style="font-size:11px;font-weight:500;color:#bfdbfe">v0.7.10</span></div>
       <div id="clock" class="sub"></div>
     </div>
     <div class="header-actions">
@@ -357,6 +357,7 @@ button:hover:not(:disabled),.camera-button:hover{filter:none}
         <button class="secondary" onclick="showAllGalleryPhotos()">全写真を表示</button>
       </div>
       <p id="gallery-range-status" class="meta" aria-live="polite"></p>
+      <label class="gallery-select"><input id="gallery-stamp" type="checkbox" onchange="$('gallery-export').replaceChildren()"><span>撮影日時を入れる（右下）</span></label>
       <div class="gallery-toolbar-row">
         <button class="secondary" onclick="setAllGalleryPhotos(true)">表示中の写真を全選択</button>
         <button class="secondary" onclick="setAllGalleryPhotos(false)">選択解除</button>
@@ -590,10 +591,7 @@ let galleryVisibleItems=[];
 let galleryRange=null;
 let gallerySelectedIds=new Set();
 
-function galleryPhotoTime(row,record){
-  const meta=(record.photos||[]).find(p=>p.name===row.name);
-  return String(meta?.takenAt||record.time||record.createdAt||"");
-}
+
 async function allGalleryPhotos(){
   const db=await openDB();
   try{
@@ -603,8 +601,16 @@ async function allGalleryPhotos(){
       request.onerror=()=>reject(request.error);
     });
     const byId=new Map(records.map(record=>[record.id,record]));
+    const occurrences=new Map();
     return rows.filter(row=>byId.has(row.recordId)&&row.blob)
-      .map(row=>({row,record:byId.get(row.recordId),time:galleryPhotoTime(row,byId.get(row.recordId))}))
+      .map(row=>{
+        const record=byId.get(row.recordId);
+        const key=JSON.stringify([row.recordId,row.name]);
+        const index=occurrences.get(key)||0;
+        occurrences.set(key,index+1);
+        const takenAt=String((record.photos||[]).filter(p=>p.name===row.name)[index]?.takenAt||"");
+        return {row,record,takenAt,time:takenAt||String(record.time||record.createdAt||"")};
+      })
       .sort((a,b)=>b.time.localeCompare(a.time)||String(b.row.id).localeCompare(String(a.row.id),undefined,{numeric:true}));
   }finally{db.close()}
 }
@@ -638,12 +644,13 @@ function setAllGalleryPhotos(checked){
   updateGallerySelectionUI();
 }
 let galleryZipBusy=false;
-function selectedGalleryExports(){
+function selectedGalleryExports(stamp=false){
   const used=new Set();
   return galleryItems.flatMap((item,index)=>{
     if(!gallerySelectedIds.has(galleryItemKey(item,index)))return [];
     const row=item.row;
-    const original=photoSaveName(row.name,index);
+    const safeName=photoSaveName(row.name,index);
+    const original=stamp?safeName.replace(/\.[^.]+$/,"")+".jpg":safeName;
     let name=original,count=1;
     while(used.has(name.toLowerCase())){
       const dot=original.lastIndexOf(".");
@@ -651,7 +658,7 @@ function selectedGalleryExports(){
       name=dot>0?original.slice(0,dot)+suffix+original.slice(dot):original+suffix;
     }
     used.add(name.toLowerCase());
-    return [{row,name}];
+    return [{row,name,takenAt:item.takenAt}];
   });
 }
 function galleryExportMessage(message){
@@ -665,10 +672,78 @@ function galleryExportButton(panel,label,action){
   button.className="secondary";button.textContent=label;button.onclick=action;
   panel.append(button);
 }
+async function stampGalleryPhoto({row,takenAt}){
+  if(!takenAt)throw new Error("撮影日時が記録されていません。");
+  const url=URL.createObjectURL(row.blob);
+  const canvas=document.createElement("canvas");
+  try{
+    const img=new Image();
+    await new Promise((resolve,reject)=>{
+      img.onload=resolve;
+      img.onerror=()=>reject(new Error("画像を読み込めません。"));
+      img.src=url;
+    });
+    const scale=Math.min(1,4096/Math.max(img.naturalWidth,img.naturalHeight),
+      Math.sqrt(12000000/(img.naturalWidth*img.naturalHeight)));
+    canvas.width=Math.max(1,Math.floor(img.naturalWidth*scale));
+    canvas.height=Math.max(1,Math.floor(img.naturalHeight*scale));
+    const ctx=canvas.getContext("2d",{alpha:false});
+    if(!ctx)throw new Error("画像を書き出せません。");
+    ctx.fillStyle="#fff";
+    ctx.fillRect(0,0,canvas.width,canvas.height);
+    ctx.drawImage(img,0,0,canvas.width,canvas.height);
+    const shortSide=Math.min(canvas.width,canvas.height);
+    const font=Math.max(1,Math.floor(shortSide*0.045));
+    const pad=Math.ceil(font*0.35), margin=Math.ceil(font*0.55);
+    ctx.font="600 "+font+"px sans-serif";
+    ctx.textBaseline="middle";
+    const width=Math.max(1,Math.min(Math.ceil(ctx.measureText(takenAt).width),canvas.width-2*(margin+pad)));
+    const x=canvas.width-margin-width-2*pad;
+    const y=canvas.height-margin-font-2*pad;
+    ctx.fillStyle="rgba(0,0,0,0.65)";
+    ctx.fillRect(x,y,width+2*pad,font+2*pad);
+    ctx.fillStyle="#fff";
+    ctx.fillText(takenAt,x+pad,y+pad+font/2,width);
+    return await new Promise((resolve,reject)=>canvas.toBlob(blob=>{
+      if(blob)resolve(blob);
+      else reject(new Error("JPEGを生成できません。"));
+    },"image/jpeg",0.92));
+  }finally{
+    canvas.width=canvas.height=0;
+    URL.revokeObjectURL(url);
+  }
+}
 async function saveSelectedGalleryToDevice(){
-  const selected=selectedGalleryExports(),session=gallerySession;
+  const stamp=$("gallery-stamp").checked;
+  const selected=selectedGalleryExports(stamp);
   if(!selected.length)return;
-  $("gallery-export").replaceChildren();
+  if(!stamp){
+    $("gallery-export").replaceChildren();
+    return shareGalleryExports(selected);
+  }
+  const panel=galleryExportMessage("日時入り写真を作成中…");
+  const progress=panel.firstChild;
+  const prepared=[];
+  try{
+    for(const item of selected){
+      if(progress.parentNode!==panel)return;
+      try{
+        const blob=await stampGalleryPhoto(item);
+        prepared.push({name:item.name,row:{blob}});
+      }catch(e){throw new Error(item.name+"："+e.message)}
+    }
+    if(progress.parentNode!==panel)return;
+    galleryExportMessage("日時入り写真ができました。下のボタンを押して保存してください。");
+    galleryExportButton(panel,"日時入り写真を保存",()=>shareGalleryExports(prepared));
+  }catch(e){
+    if(progress.parentNode===panel){
+      galleryExportMessage("日時入り写真を作成できませんでした（"+e.message+"）。「撮影日時を入れる」をオフにすると元の写真を保存できます。");
+    }
+  }
+}
+async function shareGalleryExports(selected){
+  const session=gallerySession;
+  const panelBefore=$("gallery-export").firstChild;
   try{
     if(navigator.share && navigator.canShare && typeof File==="function"){
       const files=selected.map(({row,name})=>new File([row.blob],name,{
@@ -683,7 +758,7 @@ async function saveSelectedGalleryToDevice(){
     if(e.name==="AbortError")return;
     console.error(e);
   }
-  if(session!==gallerySession)return;
+  if(session!==gallerySession||panelBefore!==$("gallery-export").firstChild)return;
   const panel=galleryExportMessage("一括共有を利用できないため、下のボタンを1枚ずつ押して保存してください。");
   selected.forEach(({row,name})=>galleryExportButton(panel,name,()=>{
     try{downloadBlob(row.blob,name)}
@@ -691,7 +766,8 @@ async function saveSelectedGalleryToDevice(){
   }));
 }
 async function saveSelectedGalleryPhotos(button){
-  const selected=selectedGalleryExports(),session=gallerySession;
+  const stampPhoto=$("gallery-stamp").checked;
+  const selected=selectedGalleryExports(stampPhoto),session=gallerySession;
   if(!selected.length||galleryZipBusy)return;
   galleryZipBusy=true;
   button.disabled=true;button.textContent="ZIPを作成中…";
@@ -700,10 +776,12 @@ async function saveSelectedGalleryPhotos(button){
   try{
     if(typeof JSZip==="undefined")throw new Error("JSZipが未読込です。通信状態を確認して再読み込みしてください。");
     const zip=new JSZip();
-    for(const {row,name} of selected){
-      step="写真の読み込み（"+name+"）";
-      if(!(row.blob instanceof Blob)||!row.blob.size)throw new Error("写真データが空か、Blob形式ではありません。");
-      zip.file(name,await row.blob.arrayBuffer(),{binary:true});
+    for(const item of selected){
+      if(progress.parentNode!==$("gallery-export"))return;
+      step=(stampPhoto?"日時入り写真の作成（":"写真の読み込み（")+item.name+"）";
+      const blob=stampPhoto?await stampGalleryPhoto(item):item.row.blob;
+      if(!(blob instanceof Blob)||!blob.size)throw new Error("写真データが空か、Blob形式ではありません。");
+      zip.file(item.name,await blob.arrayBuffer(),{binary:true});
     }
     step="ZIPの生成";
     const blob=await zip.generateAsync({type:"blob",compression:"STORE",streamFiles:true});
@@ -720,7 +798,8 @@ async function saveSelectedGalleryPhotos(button){
   }catch(e){
     console.error(e);
     if(session===gallerySession){
-      galleryExportMessage(step+"に失敗しました（"+(e.message||e.name)+"）。「端末に保存」をお試しください。");
+      galleryExportMessage(step+"に失敗しました（"+(e.message||e.name)+"）。"+
+        (stampPhoto?"「撮影日時を入れる」をオフにして再試行するか、":"")+"「端末に保存」をお試しください。");
     }
   }finally{
     galleryZipBusy=false;
@@ -831,6 +910,7 @@ function closePhotoGallery(){
   galleryVisibleItems=[];
   galleryRange=null;
   gallerySelectedIds.clear();
+  $("gallery-stamp").checked=false;
   const content=$("photo-gallery-content");
   content.querySelectorAll("[data-url]").forEach(card=>URL.revokeObjectURL(card.dataset.url));
   content.innerHTML="";
