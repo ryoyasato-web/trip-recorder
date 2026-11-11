@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>出張メール・報告ジェネレーター PC v0.6.31 (ERI 総合観測室向け)</title>
+    <title>出張メール・報告ジェネレーター PC v0.6.32 (ERI 総合観測室向け)</title>
     <!-- Tailwind CSS for styling -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- EXIF.js for reading image metadata -->
@@ -157,7 +157,7 @@ body>header{position:sticky;top:0;z-index:30}
 
     <header class="bg-blue-800 text-white p-4 shadow-md flex-shrink-0 flex justify-between items-center">
         <div>
-            <h1 class="text-xl font-bold">出張メール・報告ジェネレーター <span class="text-sm font-normal text-blue-200">PC v0.6.31</span></h1>
+            <h1 class="text-xl font-bold">出張メール・報告ジェネレーター <span class="text-sm font-normal text-blue-200">PC v0.6.32</span></h1>
             <p class="text-xs text-blue-200">現場記録を長期保存し、出張報告まで一元管理</p>
         </div>
         <div class="flex items-center gap-3">
@@ -797,6 +797,30 @@ body>header{position:sticky;top:0;z-index:30}
             return '　'.repeat(Math.floor(width / 2)) + ' '.repeat(width % 2);
         }
 
+        const basicLabelSegmenter = typeof Intl.Segmenter === 'function'
+            ? new Intl.Segmenter('ja', { granularity: 'grapheme' })
+            : null;
+
+        function justifyBasicLabel(label, width) {
+            const characters = basicLabelSegmenter
+                ? Array.from(basicLabelSegmenter.segment(label), part => part.segment)
+                : Array.from(label);
+            const extra = width - basicTextWidth(label);
+            if (extra <= 0) return label;
+            if (characters.length === 1) {
+                const left = Math.floor(extra / 2);
+                return basicTextIndent(left) + label + basicTextIndent(extra - left);
+            }
+
+            const gaps = characters.length - 1;
+            return characters.map((character, index) => {
+                if (index === gaps) return character;
+                const start = Math.round(extra * index / gaps);
+                const end = Math.round(extra * (index + 1) / gaps);
+                return character + basicTextIndent(end - start);
+            }).join('');
+        }
+
         function syncBasicInfoText() {
             const fields = basicFields.filter(field => field.label.trim() !== '');
             const labelWidth = fields.reduce((width, field) =>
@@ -805,9 +829,9 @@ body>header{position:sticky;top:0;z-index:30}
 
             inputBasicInfo.value = fields.map(field => {
                 const label = field.label.trim();
-                const padding = basicTextIndent(labelWidth - basicTextWidth(label));
+                const alignedLabel = justifyBasicLabel(label, labelWidth);
                 const [first, ...rest] = String(field.value ?? '').split(/\r\n?|\n/);
-                return [label + padding + '：' + first,
+                return [alignedLabel + '：' + first,
                     ...rest.map(line => continuationIndent + line)].join('\n');
             }).join('\n');
         }
@@ -935,8 +959,16 @@ body>header{position:sticky;top:0;z-index:30}
                 const match = clean.match(/^([^：:]+)([：:])(.*)$/);
                 if (match) {
                     const [, name, colon, value] = match;
-                    previous = { label: name.trim(), value: value.trim() };
-                    continuationIndent = basicTextIndent(basicTextWidth(name + colon));
+                    const label = name.trim();
+                    const leadingIndent = unquoted.slice(0, unquoted.length - clean.length);
+                    const knownLabel = [...basicFields, ...defaultBasicFieldTemplates]
+                        .map(field => field.label.trim())
+                        .find(candidate => candidate && normalizeFieldLabel(candidate) === normalizeFieldLabel(label));
+                    const formattedName = leadingIndent + name;
+                    const nameWidth = basicTextWidth(formattedName);
+                    const isAligned = knownLabel && justifyBasicLabel(knownLabel, nameWidth) === formattedName;
+                    previous = { label: isAligned ? knownLabel : label, value: value.trim() };
+                    continuationIndent = basicTextIndent(basicTextWidth((isAligned ? formattedName : name) + colon));
                     parsed.push(previous);
                 } else {
                     if (keepBareLabels && clean.trim()) parsed.push({ label: clean.trim(), value: '' });
