@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>出張メール・報告ジェネレーター PC v0.6.30 (ERI 総合観測室向け)</title>
+    <title>出張メール・報告ジェネレーター PC v0.6.31 (ERI 総合観測室向け)</title>
     <!-- Tailwind CSS for styling -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- EXIF.js for reading image metadata -->
@@ -131,6 +131,25 @@ body>header{position:sticky;top:0;z-index:30}
 #archive-save-status{overflow-wrap:anywhere;max-width:32em}
 @media(max-width:1023px){body>header{padding:8px 16px;gap:8px}body>header h1{font-size:16px}body>header>div:last-child{gap:8px}body>header button{padding:6px 12px;min-height:44px}}
 @media(max-width:600px){body>header>div:first-child{display:none}body>header>div:last-child{width:100%}#archive-save-controls{flex:1 0 100%;flex-direction:row;align-items:center;gap:8px}#archive-save-button{flex:0 0 auto}#archive-save-status{font-size:12px;line-height:1.4}body>header button{font-size:14px}#save-status{font-size:12px}}
+#basic-fields-container .basic-field-row {
+    display: grid;
+    grid-template-columns: clamp(6rem, 28%, 12rem) max-content minmax(0, 1fr);
+    gap: 4px;
+    align-items: start;
+}
+.basic-field-colon { padding-top: 13px; line-height: 1.5; }
+.basic-field-controls { grid-column: 1 / -1; }
+#basic-fields-container :is(input[type="text"], textarea, select) {
+    box-sizing: border-box;
+    min-width: 0;
+    max-width: 100%;
+}
+#basic-fields-container textarea {
+    field-sizing: content;
+    min-height: calc(1.5em + 26px);
+    max-height: calc(9em + 26px);
+    resize: vertical;
+}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/dropbox@10.46.0/dist/Dropbox-sdk.min.js"></script>
 </head>
@@ -138,7 +157,7 @@ body>header{position:sticky;top:0;z-index:30}
 
     <header class="bg-blue-800 text-white p-4 shadow-md flex-shrink-0 flex justify-between items-center">
         <div>
-            <h1 class="text-xl font-bold">出張メール・報告ジェネレーター <span class="text-sm font-normal text-blue-200">PC v0.6.30</span></h1>
+            <h1 class="text-xl font-bold">出張メール・報告ジェネレーター <span class="text-sm font-normal text-blue-200">PC v0.6.31</span></h1>
             <p class="text-xs text-blue-200">現場記録を長期保存し、出張報告まで一元管理</p>
         </div>
         <div class="flex items-center gap-3">
@@ -764,11 +783,37 @@ body>header{position:sticky;top:0;z-index:30}
             if (typeof saveDraft === "function") saveDraft();
         }
 
+        // プレーンテキストの字下げを、半角と全角の文字幅に合わせる。
+        function basicTextWidth(text) {
+            let width = 0;
+            for (const character of text) {
+                if (/\p{Mark}/u.test(character)) continue;
+                width += /[\u0000-\u00ff\uff61-\uff9f]/u.test(character) ? 1 : 2;
+            }
+            return width;
+        }
+
+        function basicTextIndent(width) {
+            return '　'.repeat(Math.floor(width / 2)) + ' '.repeat(width % 2);
+        }
+
         function syncBasicInfoText() {
-            inputBasicInfo.value = basicFields
-                .filter(field => field.label.trim() !== '')
-                .map(field => `${field.label.trim()}：${field.value}`)
-                .join('\n');
+            const fields = basicFields.filter(field => field.label.trim() !== '');
+            const labelWidth = fields.reduce((width, field) =>
+                Math.max(width, basicTextWidth(field.label.trim())), 0);
+            const continuationIndent = basicTextIndent(labelWidth + 2);
+
+            inputBasicInfo.value = fields.map(field => {
+                const label = field.label.trim();
+                const padding = basicTextIndent(labelWidth - basicTextWidth(label));
+                const [first, ...rest] = String(field.value ?? '').split(/\r\n?|\n/);
+                return [label + padding + '：' + first,
+                    ...rest.map(line => continuationIndent + line)].join('\n');
+            }).join('\n');
+        }
+
+        function resizeBasicValue(input) {
+            input.rows = Math.min(6, input.value.split('\n').length);
         }
 
         function getPresetValues(label) {
@@ -788,7 +833,7 @@ body>header{position:sticky;top:0;z-index:30}
 
             basicFields.forEach(field => {
                 const row = document.createElement('div');
-                row.className = 'grid grid-cols-12 gap-2 items-start bg-gray-50 border rounded-lg p-2';
+                row.className = 'basic-field-row bg-gray-50 border rounded-lg p-2';
 
                 const presets = getPresetValues(field.label);
                 const presetOptions = presets
@@ -796,62 +841,58 @@ body>header{position:sticky;top:0;z-index:30}
                     .join('');
 
                 row.innerHTML = `
-                    <div class="col-span-4 lg:col-span-3">
+                    <div class="min-w-0">
                         <input type="text"
                             value="${escapeHtml(field.label)}"
                             oninput="updateBasicField(${field.id}, 'label', this.value)"
                             onchange="renderBasicFields(); saveDraft();"
                             placeholder="項目名"
+                            aria-label="基本情報の項目名"
                             class="w-full p-2 border rounded bg-white text-sm font-medium focus:ring-1 focus:ring-blue-400 outline-none">
                     </div>
 
-                    <div class="col-span-6 lg:col-span-7">
-                        <div class="flex gap-1">
-                            <input type="text"
-                                value="${escapeHtml(field.value)}"
-                                oninput="updateBasicField(${field.id}, 'value', this.value)"
-                                placeholder="内容を入力"
-                                class="min-w-0 flex-1 p-2 border rounded bg-white text-sm focus:ring-1 focus:ring-blue-400 outline-none">
+                    <span class="basic-field-colon" aria-hidden="true">：</span>
+                    <textarea rows="1"
+                        oninput="resizeBasicValue(this); updateBasicField(${field.id}, 'value', this.value)"
+                        aria-label="${escapeHtml(field.label.trim() || '基本情報')}の内容"
+                        placeholder="内容を入力"
+                        class="block w-full p-2 border rounded bg-white text-sm focus:ring-1 focus:ring-blue-400 outline-none"></textarea>
 
-                            ${presets.length ? `
-                            <select onchange="applyPreset(${field.id}, this.value); this.selectedIndex=0"
-                                class="max-w-[130px] p-2 border rounded bg-white text-xs text-gray-700"
-                                title="よく使う内容から選択">
-                                <option value="">よく使う内容</option>
-                                ${presetOptions}
-                            </select>` : ''}
-                        </div>
+                    <div class="basic-field-controls flex flex-wrap items-center gap-x-3">
+                        ${presets.length ? `
+                        <select onchange="applyPreset(${field.id}, this.value); this.selectedIndex=0"
+                            class="max-w-[130px] p-2 border rounded bg-white text-xs text-gray-700"
+                            title="よく使う内容から選択">
+                            <option value="">よく使う内容</option>
+                            ${presetOptions}
+                        </select>` : ''}
 
-                        <div class="mt-1 flex items-center gap-2">
-                            <button onclick="saveCurrentAsPreset(${field.id})"
-                                class="text-[10px] text-amber-700 hover:text-amber-900 hover:underline"
-                                title="現在の入力内容をこの項目の候補として保存">
-                                ★ よく使う内容に登録
-                            </button>
-                            ${presets.length ? `
-                            <button onclick="managePresets('${escapeHtml(field.label).replaceAll("'", "&#039;")}')"
-                                class="text-[10px] text-gray-400 hover:text-gray-600 hover:underline">
-                                候補を編集
-                            </button>` : ''}
-                        </div>
-                    </div>
-
-                    <div class="col-span-1 flex justify-center pt-1">
-                        <label class="flex flex-col items-center text-[10px] text-gray-500 cursor-pointer select-none" title="未入力時に警告する">
+                        <button onclick="saveCurrentAsPreset(${field.id})"
+                            class="text-[10px] text-amber-700 hover:text-amber-900 hover:underline"
+                            title="現在の入力内容をこの項目の候補として保存">
+                            ★ よく使う内容に登録
+                        </button>
+                        ${presets.length ? `
+                        <button type="button" data-edit-preset
+                            class="text-[10px] text-gray-400 hover:text-gray-600 hover:underline">
+                            候補を編集
+                        </button>` : ''}
+                        <label class="ml-auto flex items-center gap-1 text-[10px] text-gray-500 cursor-pointer select-none" title="未入力時に警告する">
                             <input type="checkbox"
                                 ${field.required ? 'checked' : ''}
                                 onchange="updateBasicField(${field.id}, 'required', this.checked)"
                                 class="accent-blue-600">
                             必須
                         </label>
-                    </div>
-
-                    <div class="col-span-1 flex justify-end pt-1">
                         <button onclick="removeBasicField(${field.id})"
                             class="text-gray-300 hover:text-red-500 text-xl leading-none px-1"
                             title="この項目を削除">×</button>
                     </div>
                 `;
+                const valueInput = row.querySelector('textarea');
+                valueInput.value = field.value;
+                resizeBasicValue(valueInput);
+                row.querySelector('[data-edit-preset]')?.addEventListener('click', () => managePresets(field.label));
                 basicFieldsContainer.appendChild(row);
             });
 
@@ -879,24 +920,29 @@ body>header{position:sticky;top:0;z-index:30}
                 .trim();
         }
 
-        function parsePastedBasicInfo(raw) {
+        function parsePastedBasicInfo(raw, keepBareLabels = false) {
             const parsed = [];
-            const lines = String(raw || '').split(/\r?\n/);
+            let previous;
+            let continuationIndent = '';
+            for (const line of String(raw || '').split(/\r\n?|\n/)) {
+                const unquoted = line.replace(/^> ?/, '');
+                if (previous && unquoted.startsWith(continuationIndent)) {
+                    previous.value += '\n' + unquoted.slice(continuationIndent.length);
+                    continue;
+                }
 
-            lines.forEach(line => {
-                const clean = line.replace(/^>\s*/, '').trim();
-                if (!clean) return;
-
-                const m = clean.match(/^(.+?)[：:]\s*(.*)$/);
-                if (!m) return;
-
-                const label = m[1].replace(/[　\s]+$/g, '').trim();
-                const value = m[2].trim();
-                if (!label) return;
-
-                parsed.push({ label, value });
-            });
-
+                const clean = unquoted.trimStart();
+                const match = clean.match(/^([^：:]+)([：:])(.*)$/);
+                if (match) {
+                    const [, name, colon, value] = match;
+                    previous = { label: name.trim(), value: value.trim() };
+                    continuationIndent = basicTextIndent(basicTextWidth(name + colon));
+                    parsed.push(previous);
+                } else {
+                    if (keepBareLabels && clean.trim()) parsed.push({ label: clean.trim(), value: '' });
+                    previous = null;
+                }
+            }
             return parsed;
         }
 
@@ -983,18 +1029,27 @@ body>header{position:sticky;top:0;z-index:30}
 
         function managePresets(label) {
             const values = getPresetValues(label);
-            const current = values.join('\n');
-            const edited = prompt(
-                `「${label}」の候補を1行に1つずつ入力してください。\\n空欄にすると候補をすべて削除します。`,
-                current
-            );
+            const hasMultiline = values.some(value => value.includes('\n'));
+            const current = hasMultiline ? JSON.stringify(values, null, 2) : values.join('\n');
+            const instructions = hasMultiline
+                ? '候補をJSONの文字列配列として編集してください。空欄にすると候補をすべて削除します。'
+                : '候補を1行に1つずつ入力してください。\n空欄にすると候補をすべて削除します。';
+            const edited = prompt(`「${label}」の${instructions}`, current);
             if (edited === null) return;
 
-            basicPresets[label] = edited
-                .split(/\r?\n/)
-                .map(v => v.trim())
-                .filter(Boolean)
-                .filter((v, i, arr) => arr.indexOf(v) === i);
+            let candidates = edited.split(/\r?\n/);
+            if (hasMultiline && edited.trim()) {
+                try {
+                    candidates = JSON.parse(edited);
+                } catch {
+                    candidates = null;
+                }
+                if (!Array.isArray(candidates) || candidates.some(value => typeof value !== 'string')) {
+                    alert('候補はJSONの文字列配列で入力してください。');
+                    return;
+                }
+            }
+            basicPresets[label] = [...new Set(candidates.map(value => value.trim()).filter(Boolean))];
 
             renderBasicFields();
             saveDraft();
@@ -1044,20 +1099,12 @@ body>header{position:sticky;top:0;z-index:30}
         function parseBasicInfoTextToFields(raw) {
             if (typeof raw !== 'string' || !raw.trim()) return makeDefaultBasicFields();
 
-            return raw.split('\n')
-                .map(line => line.replace(/^>\s*/, '').trim())
-                .filter(Boolean)
-                .map(line => {
-                    const m = line.match(/^([^：:]+)[：:]\s*(.*)$/);
-                    const label = m ? m[1].trim() : line;
-                    const value = m ? m[2].trim() : '';
-                    return {
-                        id: basicFieldIdCounter++,
-                        label,
-                        value,
-                        required: inferRequiredFromLabel(label)
-                    };
-                });
+            return parsePastedBasicInfo(raw, true).map(({ label, value }) => ({
+                id: basicFieldIdCounter++,
+                label,
+                value,
+                required: inferRequiredFromLabel(label)
+            }));
         }
 
         function getFieldValue(field) {
@@ -2103,7 +2150,7 @@ body>header{position:sticky;top:0;z-index:30}
                     <div class="bg-white border rounded-xl p-5">
                         <h4 class="font-bold text-gray-800 mb-3">基本情報</h4>
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
-                            ${fields.filter(f=>String(f.label||"").trim()).map(f=>`<div class="border rounded p-2"><div class="text-[11px] text-gray-500">${escapeHtml(f.label)}</div><div class="text-sm">${escapeHtml(f.value||"")}</div></div>`).join("")}
+                            ${fields.filter(f=>String(f.label||"").trim()).map(f=>`<div class="border rounded p-2"><div class="text-[11px] text-gray-500">${escapeHtml(f.label)}</div><div class="text-sm whitespace-pre-wrap break-words">${escapeHtml(f.value||"")}</div></div>`).join("")}
                         </div>
                     </div>
                     <div class="bg-white border rounded-xl p-5">
@@ -3906,9 +3953,8 @@ body>header{position:sticky;top:0;z-index:30}
             syncBasicInfoText();
             let reportText = `${inputIntro.value}\n\n`;
 
-            const purposeMatch = inputBasicInfo.value.match(/(?:^|\n)\s*>?\s*用務\s*[：:]\s*(.+)/);
-            const placeMatch = inputBasicInfo.value.match(/(?:^|\n)\s*>?\s*用務先\s*[：:]\s*(.+)/);
-            const label = purposeMatch?.[1]?.trim() || placeMatch?.[1]?.trim() || "";
+            const firstLine = value => value.split(/\r\n?|\n/)[0].trim();
+            const label = firstLine(basicFieldValue('用務')) || firstLine(basicFieldValue('用務先'));
             const autoSubject = `${currentMode === 'plan' ? '【出張予定】' : '【出張報告】'}${label}`;
             if (!subjectText.dataset.userEdited || subjectText.value.trim() === "") {
                 subjectText.value = autoSubject;
@@ -3925,20 +3971,11 @@ body>header{position:sticky;top:0;z-index:30}
             } else {
                 reportText += `以下の出張報告をお送りします\n\n`;
                 
-                // 基本情報の各行の頭に > を付与
-                const basicInfoLines = inputBasicInfo.value.split('\n');
-                basicInfoLines.forEach(line => {
-                    if (line.trim() !== "") {
-                        // 既に > が付いている場合は二重にならないようにする
-                        if (line.trim().startsWith('>')) {
-                            reportText += `${line}\n`;
-                        } else {
-                            reportText += `> ${line}\n`;
-                        }
-                    }
-                });
-                reportText += `\n`;
-                
+                if (inputBasicInfo.value) {
+                    reportText += inputBasicInfo.value.split('\n').map(line => '> ' + line).join('\n') + '\n';
+                }
+                reportText += '\n';
+
                 const reportStyle = reportStyleSelect?.value || "prose";
 
                 if (reportStyle === "prose" && events.length > 0) {
