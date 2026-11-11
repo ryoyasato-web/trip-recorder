@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>出張メール・報告ジェネレーター PC v0.6.32 (ERI 総合観測室向け)</title>
+    <title>出張メール・報告ジェネレーター PC v0.6.33 (ERI 総合観測室向け)</title>
     <!-- Tailwind CSS for styling -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- EXIF.js for reading image metadata -->
@@ -157,7 +157,7 @@ body>header{position:sticky;top:0;z-index:30}
 
     <header class="bg-blue-800 text-white p-4 shadow-md flex-shrink-0 flex justify-between items-center">
         <div>
-            <h1 class="text-xl font-bold">出張メール・報告ジェネレーター <span class="text-sm font-normal text-blue-200">PC v0.6.32</span></h1>
+            <h1 class="text-xl font-bold">出張メール・報告ジェネレーター <span class="text-sm font-normal text-blue-200">PC v0.6.33</span></h1>
             <p class="text-xs text-blue-200">現場記録を長期保存し、出張報告まで一元管理</p>
         </div>
         <div class="flex items-center gap-3">
@@ -788,13 +788,14 @@ body>header{position:sticky;top:0;z-index:30}
             let width = 0;
             for (const character of text) {
                 if (/\p{Mark}/u.test(character)) continue;
-                width += /[\u0000-\u00ff\uff61-\uff9f]/u.test(character) ? 1 : 2;
+                width += /[\u0000-\u00ff\u2002\uff61-\uff9f]/u.test(character) ? 1 : 2;
             }
             return width;
         }
 
         function basicTextIndent(width) {
-            return '　'.repeat(Math.floor(width / 2)) + ' '.repeat(width % 2);
+            // EN SPACE keeps half-em padding in proportional fonts.
+            return '　'.repeat(Math.floor(width / 2)) + '\u2002'.repeat(width % 2);
         }
 
         const basicLabelSegmenter = typeof Intl.Segmenter === 'function'
@@ -944,13 +945,19 @@ body>header{position:sticky;top:0;z-index:30}
                 .trim();
         }
 
+        function normalizeBasicPadding(text) {
+            // Accept ASCII padding from reports generated before v0.6.33.
+            return text.replaceAll('\u2002', ' ');
+        }
+
         function parsePastedBasicInfo(raw, keepBareLabels = false) {
             const parsed = [];
             let previous;
             let continuationIndent = '';
             for (const line of String(raw || '').split(/\r\n?|\n/)) {
                 const unquoted = line.replace(/^> ?/, '');
-                if (previous && unquoted.startsWith(continuationIndent)) {
+                const prefix = unquoted.slice(0, continuationIndent.length);
+                if (previous && normalizeBasicPadding(prefix) === continuationIndent) {
                     previous.value += '\n' + unquoted.slice(continuationIndent.length);
                     continue;
                 }
@@ -966,9 +973,11 @@ body>header{position:sticky;top:0;z-index:30}
                         .find(candidate => candidate && normalizeFieldLabel(candidate) === normalizeFieldLabel(label));
                     const formattedName = leadingIndent + name;
                     const nameWidth = basicTextWidth(formattedName);
-                    const isAligned = knownLabel && justifyBasicLabel(knownLabel, nameWidth) === formattedName;
+                    const isAligned = knownLabel &&
+                        normalizeBasicPadding(justifyBasicLabel(knownLabel, nameWidth)) === normalizeBasicPadding(formattedName);
                     previous = { label: isAligned ? knownLabel : label, value: value.trim() };
-                    continuationIndent = basicTextIndent(basicTextWidth((isAligned ? formattedName : name) + colon));
+                    continuationIndent = normalizeBasicPadding(
+                        basicTextIndent(basicTextWidth((isAligned ? formattedName : name) + colon)));
                     parsed.push(previous);
                 } else {
                     if (keepBareLabels && clean.trim()) parsed.push({ label: clean.trim(), value: '' });
